@@ -9,6 +9,42 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# Warnings — applied to all build types.
+set(MATDECOMP_WARNING_FLAGS
+    -Wall
+    -Wextra
+    -Wpedantic
+    -Wno-unused-parameter
+)
+
+# Maximum Debug Flags
+set(MATDECOMP_CXX_DEBUG_FLAGS
+    -O0
+    -g3
+)
+
+# CUDA debug flags — passed to nvcc.
+set(MATDECOMP_CUDA_DEBUG_FLAGS
+    -G
+)
+
+# Intentionally excluded from -ffast-math:
+#   -ffinite-math-only     would assume no NaN/Inf — unsafe for general inputs
+set(MATDECOMP_RELEASE_FLAGS
+    -march=native
+    -fno-math-errno       # skip errno after sqrt/log/etc.
+    -fno-trapping-math    # assume no FP trap signals (default MXCSR on x86)
+    -fno-signed-zeros     # -0.0 == 0.0; required by GCC to activate fassociative-math
+    -fassociative-math    # allow FP reordering → vectorised reductions (dot product)
+    -ffp-contract=fast    # fuse multiply-add into FMA instructions
+)
+
+# Pass extra flags at configure time, e.g.
+#   cmake -DMATDECOMP_EXTRA_FLAGS="-funroll-loops;-fprofile-use=perf.data" ..
+set(MATDECOMP_EXTRA_FLAGS "" CACHE STRING
+    "Additional compiler flags appended to all build types (semicolon-separated)")
+separate_arguments(MATDECOMP_EXTRA_FLAGS_LIST UNIX_COMMAND "${MATDECOMP_EXTRA_FLAGS}")
+
 # Test dependencies
 include(FetchContent)
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
