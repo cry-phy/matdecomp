@@ -2,6 +2,8 @@
 
 !.gitignore
 !.clang-format
+# .clangd is machine-local (conda paths, GPU arch) — not tracked
+.clangd
 
 !include/
 !include/**
