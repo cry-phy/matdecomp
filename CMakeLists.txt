@@ -24,10 +24,14 @@ set(MATDECOMP_WARNING_FLAGS
 # CUDA warning flags — -Wpedantic is excluded because NVCC's intermediate code
 # emits `# linenum file` line directives (a GCC extension) that trigger it on
 # the host compiler pass, producing noise unrelated to user code.
+# --ptxas-options=-v prints per-kernel register/shared-memory usage at compile
+# time, making register-pressure launch failures visible before they silently
+# produce all-zero output at runtime.
 set(MATDECOMP_CUDA_WARNING_FLAGS
     -Wall
     -Wextra
     -Wno-unused-parameter
+    --ptxas-options=-v
 )
 
 # Maximum Debug Flags
@@ -77,6 +81,13 @@ FetchContent_Declare(
   GIT_TAG v1.9.5
 )
 FetchContent_MakeAvailable(benchmark)
+
+add_custom_target(run-benchmark
+    COMMAND matdecomp_cpu_benchmarks
+    COMMAND matdecomp_gpu_benchmarks
+    COMMENT "Running all benchmarks..."
+)
+    
 
 option(MATDECOMP_REFERENCE_BENCHMARKS "Build cuSPARSE/cuSOLVER reference benchmarks" OFF)
 

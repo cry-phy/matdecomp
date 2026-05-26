@@ -1,15 +1,14 @@
 #include "common/cpuBuffer.hpp"
-#include "common/utils.hpp"
+#include "common/cpuUtils.hpp"
 #include "qr/cpuGramSchmidt.hpp"
 #include <benchmark/benchmark.h>
 
-template <typename T>
-static void benchmarkCpuGramSchmidt(benchmark::State &state) {
+template <typename T> static void benchmarkCpuGramSchmidt(benchmark::State& state) {
   size_t M = state.range(0);
   size_t N = state.range(1);
-  T *A = common::allocBuffer<T>(M * N);
-  T *Q = common::allocBuffer<T>(M * N);
-  T *R = common::allocBuffer<T>(N * N);
+  T* A = common::allocBuffer<T>(M * N);
+  T* Q = common::allocBuffer<T>(M * N);
+  T* R = common::allocBuffer<T>(N * N);
 
   common::fillRandom(A, M * N);
 
@@ -27,11 +26,10 @@ static void benchmarkCpuGramSchmidt(benchmark::State &state) {
 /**
  * @brief Benchmark square matrix performance
  */
-BENCHMARK_TEMPLATE(benchmarkCpuGramSchmidt, float)
-    ->Apply([](benchmark::Benchmark *b) {
-      for (long M = 128; M <= 4096; M *= 2) {
-        b->Args({M, M});
-      }
-    });
+BENCHMARK_TEMPLATE(benchmarkCpuGramSchmidt, float)->Apply([](benchmark::Benchmark* b) {
+  for (long M = 128; M <= 4096; M *= 2) {
+    b->Args({M, M});
+  }
+});
 
 BENCHMARK_MAIN();
