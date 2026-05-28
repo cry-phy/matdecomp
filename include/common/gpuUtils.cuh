@@ -40,6 +40,13 @@ template <typename T> __global__ void randomFill(T* buffer, size_t N) {
   }
 }
 
+template <typename T> __global__ void copyBuffer(const T* src, T* dst, size_t N) {
+  uint32_t idx = threadIdx.x + blockDim.x * blockIdx.x;
+  if (idx < N) {
+    dst[idx] = src[idx];
+  }
+}
+
 } // namespace gpu
 
 } // namespace common

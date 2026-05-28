@@ -2,6 +2,7 @@ add_library(matdecomp_qr STATIC)
 
 target_sources(matdecomp_qr PRIVATE
     cpuGramSchmidt.cpp
+    gpuGramSchmidt.cu
 )
 
 add_library(matdecomp::qr ALIAS matdecomp_qr)
@@ -11,7 +12,8 @@ target_include_directories(matdecomp_qr PUBLIC
 )
 
 target_compile_options(matdecomp_qr PRIVATE
-    ${MATDECOMP_WARNING_FLAGS}
+    $<$<COMPILE_LANGUAGE:CXX>:${MATDECOMP_WARNING_FLAGS}>
+    $<$<COMPILE_LANGUAGE:CUDA>:${MATDECOMP_CUDA_WARNING_FLAGS}>
     $<$<AND:$<CONFIG:Debug>,$<COMPILE_LANGUAGE:CXX>>:${MATDECOMP_CXX_DEBUG_FLAGS}>
     $<$<AND:$<CONFIG:Debug>,$<COMPILE_LANGUAGE:CUDA>>:${MATDECOMP_CUDA_DEBUG_FLAGS}>
     $<$<CONFIG:Release>:${MATDECOMP_RELEASE_FLAGS}>

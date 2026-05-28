@@ -1,7 +1,7 @@
 #pragma once
 #include <cstddef>
 
-namespace qr {
+namespace qr::cpu {
 
 /**
  * @brief Naive Gram-Schmidt QR decomposition (CPU).
@@ -15,16 +15,14 @@ namespace qr {
  * @param M Number of rows
  * @param N Number of columns
  */
-template <typename T>
-void gramSchmidt(const T *A, T *Q, T *R, size_t M, size_t N);
+template <typename T> void gramSchmidt(const T* A, T* Q, T* R, size_t M, size_t N);
 
-} // namespace qr
+} // namespace qr::cpu
 
 namespace {
 
-template <typename T> void gsComputeQ(const T *A, T *Q, size_t M, size_t N);
+template <typename T> void gsComputeQ(const T* A, T* Q, size_t M, size_t N);
 
-template <typename T>
-void gsComputeR(const T *A, const T *Q, T *R, size_t M, size_t N);
+template <typename T> void gsComputeR(const T* A, const T* Q, T* R, size_t M, size_t N);
 
 } // anonymous namespace

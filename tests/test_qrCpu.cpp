@@ -12,7 +12,7 @@ INSTANTIATE_TEST_SUITE_P(
 
 TEST_P(QRTestFloat, CpuGramSchmidt) {
   const auto& tc = GetParam();
-  qr::gramSchmidt(tc.A, Q, R, M, N);
+  qr::cpu::gramSchmidt(tc.A, Q, R, M, N);
 
   float tol = static_cast<float>(tc.kappa) * static_cast<float>(N) *
               std::numeric_limits<float>::epsilon() * 100.0f;

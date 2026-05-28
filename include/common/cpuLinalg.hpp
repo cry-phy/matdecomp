@@ -3,7 +3,7 @@
 #include <cmath>
 #include <cstddef>
 
-namespace common {
+namespace common::cpu {
 
 /**
  * @brief Computes the dot product of two vectors.
@@ -126,4 +126,4 @@ inline bool isClose(const T* a, const T* b, size_t n, T tol = std::numeric_limit
   return true;
 }
 
-} // namespace common
+} // namespace common::cpu

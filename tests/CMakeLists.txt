@@ -27,8 +27,7 @@ gtest_discover_tests(matdecomp_tests)
 # ── GPU tests ────────────────────────────────────────────────────────────────
 add_executable(matdecomp_gpu_tests
     test_gpuLinalg.cu
-    test_qrGpu_kernel.cu
-    test_qrGpu.cpp
+    test_qrGpu.cu
 )
 
 target_include_directories(matdecomp_gpu_tests PRIVATE

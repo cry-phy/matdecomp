@@ -2,12 +2,6 @@
 #include "qr/gpuGramSchmidt.cuh"
 #include <benchmark/benchmark.h>
 
-template <typename T>
-__global__ __launch_bounds__(MAX_BLOCK_SIZE) void executeGramSchmidt(T* A, T* Q, T* R, int M,
-                                                                      int N, T* workspace) {
-  qr::gpuGramSchmidt(A, Q, R, M, N, workspace);
-}
-
 template <typename T> static void benchmarkGpuGramSchmidt(benchmark::State& state) {
   int M = state.range(0);
   int N = state.range(1);
@@ -27,10 +21,21 @@ template <typename T> static void benchmarkGpuGramSchmidt(benchmark::State& stat
   cudaDeviceSynchronize();
 
   for (auto _ : state) {
-    executeGramSchmidt<<<1, MAX_BLOCK_SIZE>>>(d_A, d_Q, d_R, M, N, d_workspace);
+    qr::gpu::GramSchmidt(d_A, d_Q, d_R, M, N, d_workspace);
     cudaDeviceSynchronize();
   }
 }
+
+/**
+ * @brief Benchmark tall skinny to square matrix performance
+ */
+BENCHMARK_TEMPLATE(benchmarkGpuGramSchmidt, float)->Apply([](benchmark::Benchmark* b) {
+  for (long M = 512; M <= 4096; M *= 2) {
+    for (long N = 2; N <= M / 2; N *= 2) {
+      b->Args({M, N});
+    }
+  }
+});
 
 /**
  * @brief Benchmark square matrix performance

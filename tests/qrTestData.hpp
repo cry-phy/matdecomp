@@ -28,13 +28,13 @@ protected:
     const auto& tc = this->GetParam();
     M = tc.M;
     N = tc.N;
-    Q = common::allocBuffer<T>(M * N);
-    R = common::allocBuffer<T>(N * N);
+    Q = common::cpu::allocBuffer<T>(M * N);
+    R = common::cpu::allocBuffer<T>(N * N);
   }
 
   void TearDown() override {
-    common::freeBuffer(Q);
-    common::freeBuffer(R);
+    common::cpu::freeBuffer(Q);
+    common::cpu::freeBuffer(R);
   }
 
   T* Q;

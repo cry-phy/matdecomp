@@ -3,7 +3,7 @@
 #include <cstdlib>
 #include <cstring>
 
-namespace common {
+namespace common::cpu {
 
 template <typename T>
 inline T *allocBuffer(size_t n) {
@@ -25,4 +25,4 @@ inline void zeroBuffer(T *buf, size_t n) {
     memset(buf, 0, n * sizeof(T));
 }
 
-} // namespace common
+} // namespace common::cpu
