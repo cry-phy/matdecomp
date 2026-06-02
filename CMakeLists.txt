@@ -9,12 +9,29 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# CUDA architecture — sm_86 = RTX 30xx / A-series (this machine's RTX 3070 Ti).
+# Override at configure time: cmake -DCMAKE_CUDA_ARCHITECTURES=89 ..
+set(CMAKE_CUDA_ARCHITECTURES 86 CACHE STRING "CUDA GPU architecture (sm_XX without 'sm_')")
+
 # Warnings — applied to all build types.
 set(MATDECOMP_WARNING_FLAGS
     -Wall
     -Wextra
     -Wpedantic
     -Wno-unused-parameter
+)
+
+# CUDA warning flags — -Wpedantic is excluded because NVCC's intermediate code
+# emits `# linenum file` line directives (a GCC extension) that trigger it on
+# the host compiler pass, producing noise unrelated to user code.
+# --ptxas-options=-v prints per-kernel register/shared-memory usage at compile
+# time, making register-pressure launch failures visible before they silently
+# produce all-zero output at runtime.
+set(MATDECOMP_CUDA_WARNING_FLAGS
+    -Wall
+    -Wextra
+    -Wno-unused-parameter
+    --ptxas-options=-v
 )
 
 # Maximum Debug Flags
@@ -65,7 +82,16 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(benchmark)
 
+add_custom_target(run-benchmark
+    COMMAND matdecomp_cpu_benchmarks
+    COMMAND matdecomp_gpu_benchmarks
+    COMMENT "Running all benchmarks..."
+)
+    
+
 option(MATDECOMP_REFERENCE_BENCHMARKS "Build cuSPARSE/cuSOLVER reference benchmarks" OFF)
+
+find_package(CUDAToolkit REQUIRED)
 
 if(MATDECOMP_REFERENCE_BENCHMARKS)
   find_package(CUDAToolkit REQUIRED COMPONENTS cusparse cusolver)
