@@ -4,23 +4,14 @@
 
 namespace {
 
-template <typename T>
-void gsPrepareQR(const T* A, T* Q, T* R, uint32_t M, uint32_t N) {
-  cudaMemcpy(Q, A, M * N * sizeof(T), cudaMemcpyDeviceToDevice);
-  cudaMemset(R, 0, N * N * sizeof(T));
-}
-
-// Classical Gram-Schmidt. For each column j, projects the original a_j
-// (referenced via A which is unchanged) onto each already-normalised q_i
-// and subtracts. workspace holds one projected column (M elements).
-template <typename T>
-void gsComputeQ(const T* A, T* Q, uint32_t M, uint32_t N, T* workspace) {
+template <typename T> void gsComputeQ(const T* A, T* Q, uint32_t M, uint32_t N, T* workspace) {
   T* d_normSq;
   T* d_dot_ab;
   T* d_dot_bb;
   cudaMalloc(&d_normSq, sizeof(T));
   cudaMalloc(&d_dot_ab, sizeof(T));
   cudaMalloc(&d_dot_bb, sizeof(T));
+  cudaMemcpy(Q, A, M * N * sizeof(T), cudaMemcpyDeviceToDevice);
 
   common::gpu::normalize<T>(Q, Q, M, d_normSq);
 
@@ -37,8 +28,8 @@ void gsComputeQ(const T* A, T* Q, uint32_t M, uint32_t N, T* workspace) {
   cudaFree(d_dot_bb);
 }
 
-template <typename T>
-void gsComputeR(const T* A, const T* Q, T* R, uint32_t M, uint32_t N) {
+template <typename T> void gsComputeR(const T* A, const T* Q, T* R, uint32_t M, uint32_t N) {
+  cudaMemset(R, 0, N * N * sizeof(T));
   for (size_t j = 0; j < N; ++j) {
     for (size_t i = 0; i <= j; ++i) {
       common::gpu::dotProduct<T>(&Q[i * M], &A[j * M], &R[i + j * N], M);
@@ -52,7 +43,6 @@ namespace qr::gpu {
 
 template <typename T>
 void GramSchmidt(const T* A, T* Q, T* R, uint32_t M, uint32_t N, T* workspace) {
-  gsPrepareQR(A, Q, R, M, N);
   gsComputeQ(A, Q, M, N, workspace);
   gsComputeR(A, Q, R, M, N);
 }

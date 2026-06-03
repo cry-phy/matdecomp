@@ -2,7 +2,9 @@ add_library(matdecomp_qr STATIC)
 
 target_sources(matdecomp_qr PRIVATE
     cpuGramSchmidt.cpp
+    cpuModifiedGramSchmidt.cpp
     gpuGramSchmidt.cu
+    gpuModifiedGramSchmidt.cu
 )
 
 add_library(matdecomp::qr ALIAS matdecomp_qr)

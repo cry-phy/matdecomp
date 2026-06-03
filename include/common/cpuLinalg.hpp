@@ -1,4 +1,5 @@
 #pragma once
+#include "common/cpuBuffer.hpp"
 #include <cassert>
 #include <cmath>
 #include <cstddef>
@@ -124,6 +125,32 @@ inline bool isClose(const T* a, const T* b, size_t n, T tol = std::numeric_limit
     }
   }
   return true;
+}
+
+/**
+ * @brief Multiplies two matrices A and B, stores the result in res. Unoptimized.
+ *
+ * @param A Input matrix A, stored column-major with leading dimension AM
+ * @param AM Number of rows in A
+ * @param AN Number of columns in A
+ * @param B Input matrix B, stored column-major with leading dimension BM
+ * @param BM Number of rows in B
+ * @param BN Number of columns in B
+ * @param res Output matrix, stored column-major with leading dimension AM
+ * @return Matrix product res = A·B, where A is AM×AN, B is BM×BN, and res is AM×BN.
+ */
+template <typename T>
+inline void matMul(const T* A, size_t AM, size_t AN, const T* B, size_t BM, size_t BN, T* res) {
+  assert(AN == BM);
+  for (size_t i = 0; i < AM; i++) {
+    for (size_t j = 0; j < BN; j++) {
+      T sum = 0;
+      for (size_t k = 0; k < AN; k++) {
+        sum += A[i + k * AM] * B[k + j * BM];
+      }
+      res[i + j * AM] = sum;
+    }
+  }
 }
 
 } // namespace common::cpu
