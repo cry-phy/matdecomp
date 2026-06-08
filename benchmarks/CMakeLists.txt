@@ -46,7 +46,11 @@ target_compile_options(matdecomp_gpu_benchmarks PRIVATE
 
 if(MATDECOMP_REFERENCE_BENCHMARKS)
     add_executable(matdecomp_reference_benchmarks
-        cpuBenchmarks
+        referenceBenchmarks.cu
+    )
+    
+    target_include_directories(matdecomp_reference_benchmarks PRIVATE
+        ${PROJECT_SOURCE_DIR}/include
     )
 
     target_link_libraries(matdecomp_reference_benchmarks PRIVATE
