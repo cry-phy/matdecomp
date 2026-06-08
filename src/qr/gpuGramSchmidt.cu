@@ -17,7 +17,7 @@ template <typename T> void gsComputeQ(const T* A, T* Q, uint32_t M, uint32_t N, 
 
   for (uint32_t j = 1; j < N; j++) {
     for (uint32_t i = 0; i < j; i++) {
-      common::gpu::project<T>(&A[j * M], &Q[i * M], workspace, M, d_dot_ab, d_dot_bb);
+      common::gpu::project<T>(&A[j * M], &Q[i * M], workspace, M, d_dot_ab);
       common::gpu::subtract<T>(&Q[j * M], workspace, &Q[j * M], M);
     }
     common::gpu::normalize<T>(&Q[j * M], &Q[j * M], M, d_normSq);

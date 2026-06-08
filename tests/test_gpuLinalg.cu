@@ -86,7 +86,9 @@ TEST(GpuLinalgTest, Project) {
   CUDACHECK(cudaMemcpy(d_a, h_a, N * sizeof(float), cudaMemcpyHostToDevice));
   CUDACHECK(cudaMemcpy(d_b, h_b, N * sizeof(float), cudaMemcpyHostToDevice));
 
-  common::gpu::project(d_a, d_b, d_result, N, d_dot_ab, d_dot_bb);
+  // Normalize b as project does not normalize b internally.
+  common::gpu::normalize(d_b, d_b, N, d_dot_bb);
+  common::gpu::project(d_a, d_b, d_result, N, d_dot_ab);
   CUDACHECK(cudaGetLastError());
 
   float h_result[N];

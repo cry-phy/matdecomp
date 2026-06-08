@@ -7,6 +7,18 @@ namespace common {
 
 namespace gpu {
 
+/**
+ * @brief Checks the return value of a CUDA API call and prints an error message if it indicates a
+ * failure, including the file and line number where the error occurred. If an error is detected,
+ * the program will exit with the error code.
+ *
+ * @param error_code The return value from a CUDA API call to be checked for errors
+ * @param file The name of the source file where the error occurred (automatically provided by
+ * __FILE__)
+ * @param line The line number in the source file where the error occurred (automatically provided
+ * by __LINE__)
+ * @return void
+ */
 #define CUDACHECK(err)                                                                             \
   do {                                                                                             \
     common::gpu::cuda_check((err), __FILE__, __LINE__);                                            \
@@ -26,10 +38,25 @@ template <typename T> __device__ void fillBuffer(T* buffer, size_t N, T value) {
   }
 }
 
+/**
+ * @brief Fills the given buffer with zeros. Each thread will set one element to zero until the
+ * entire
+ *
+ * @param buffer Pointer to the buffer to be filled with zeros
+ * @param N Number of elements in the buffer
+ * @return void
+ */
 template <typename T> __device__ void zeroBuffer(T* buffer, size_t N) {
   fillBuffer(buffer, N, static_cast<T>(0.0f));
 }
 
+/**
+ * @brief Fills the given buffer with random values in the range [0, 1).
+ *
+ * @param buffer Pointer to the buffer to be filled with random values
+ * @param N Number of elements in the buffer
+ * @return void
+ */
 template <typename T> __global__ void randomFill(T* buffer, size_t N) {
   uint32_t idx = threadIdx.x + blockDim.x * blockIdx.x;
   if (idx < N) {
@@ -40,6 +67,14 @@ template <typename T> __global__ void randomFill(T* buffer, size_t N) {
   }
 }
 
+/**
+ * @brief Copies data from the source buffer to the destination buffer.
+ *
+ * @param src pointer to the source buffer
+ * @param dst pointer to the destination buffer
+ * @param N number of elements to copy
+ * @return void
+ */
 template <typename T> __global__ void copyBuffer(const T* src, T* dst, size_t N) {
   uint32_t idx = threadIdx.x + blockDim.x * blockIdx.x;
   if (idx < N) {
