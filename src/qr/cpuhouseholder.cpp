@@ -1,15 +1,15 @@
-#include "qr/cpuHouseholder.hpp"
+#include "qr/cpuhouseholder.hpp"
 #include "common/cpuBuffer.hpp"
 #include <cmath>
 #include <cassert>
 
-namspace qr::cpu {
-    template <typename T> void householder(const T* A, T* Q, T* A, size_t M, size_t N) {
+namespace qr::cpu {
+    template <typename T> void householder(const T* A, T* Q, T* R, size_t M, size_t N) {
         assert(M>=N);
 
         T* R_tmp = common::cpu::allocBuffer<T>(M*N);
         T* V = common::cpu::allocBuffer<T>(M*N);
-        T* tau == common::cpu::allocBuffer<T>(N);
+        T* tau = common::cpu::allocBuffer<T>(N);
         // initialize R with copy of A and clear V
         for (size_t i = 0; i <M*N; ++i) {
             R_tmp[i] = A[i];
@@ -18,16 +18,16 @@ namspace qr::cpu {
 
         // first Forward pass: compute R and store Housholder vectors in V
         for (size_t k = 0; k<N; ++k) {
-            T norm_x = 0
+            T norm_x = 0;
                 for (size_t i = k; i<M; ++i) {
                     norm_x += R_tmp[i+k*M] * R_tmp[i+k*M];
                 }
-                norm_x = std::sqrt(norm_x)
+                norm_x = std::sqrt(norm_x);
 
                 if (norm_x ==0) {
                     tau[k] = 0;
                 } else {
-                    T x0 = R_tmp[k+k*M]
+                    T x0 = R_tmp[k+k*M];
                     T g = (x0>0) ? norm_x : -norm_x;
                     V[k+k*M] = x0 +g;
                     for (size_t i = k+1; i<M; ++i) {
@@ -43,7 +43,7 @@ namspace qr::cpu {
                     for (size_t j = k; j<N; ++j) {
                         T sum = 0;
                         for (size_t i = k; i<M; ++i) {
-                            sum += V[i+k*M] * R_tmp[i+j*M]
+                            sum += V[i+k*M] * R_tmp[i+j*M];
                         }
                         for (size_t i = k; i<M;++i) {
                             R_tmp[i+j*M] -= tau[k] * V[i+k*M] * sum;
@@ -81,7 +81,7 @@ namspace qr::cpu {
             }
         }
 
-        common::cpu::freeBuffer(R_temp);
+        common::cpu::freeBuffer(R_tmp);
         common::cpu::freeBuffer(V);
         common::cpu::freeBuffer(tau);
     }
