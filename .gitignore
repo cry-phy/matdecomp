@@ -17,4 +17,4 @@
 !benchmarks/
 !benchmarks/**
 
-!**/CMakeLists.txt 
+!**/CMakeLists.txt
