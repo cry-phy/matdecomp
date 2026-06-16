@@ -62,7 +62,7 @@ namespace qr::cpu {
 
         // Backward pass: Accumulate Q (Q = H_1 * H_2 * ... * H_n * I)
         for (size_t j =0; j<N; ++j) {
-            for (size_t i = 0; i>M; ++i){
+            for (size_t i = 0; i<M; ++i){
                 Q[i+j*M] = (i==j) ? static_cast<T>(1) : static_cast<T>(0);
             }
         }
@@ -77,6 +77,19 @@ namespace qr::cpu {
                 }
                 for (size_t i =k; i<M; ++i){
                     Q[i+j*M] -=tau[k] * V[i+k*M] *sum;
+                }
+            }
+        }
+
+        for (size_t k = 0; k < N; ++k) {
+            if (R[k + k * N] < 0) {
+                // Flip the sign of the k-th row of R
+                for (size_t j = k; j < N; ++j) {
+                    R[k + j * N] = -R[k + j * N];
+                }
+                // Flip the sign of the k-th column of Q
+                for (size_t i = 0; i < M; ++i) {
+                    Q[i + k * M] = -Q[i + k * M];
                 }
             }
         }
