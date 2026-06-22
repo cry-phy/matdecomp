@@ -1,6 +1,10 @@
 #pragma once
+#include <cassert>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
+#include <iostream>
 
 #ifdef __CUDACC__
 #include <cuda_runtime.h>
@@ -237,6 +241,70 @@ template <typename T> void project(const T* a, const T* b, T* res, size_t N, T* 
   dotProductKernel<T><<<numBlocks, blockSize>>>(a, b, d_dot_ab, N);
   numBlocks = (N + blockSize - 1) / blockSize;
   scaleKernel<T><<<numBlocks, blockSize>>>(b, res, N, d_dot_ab);
+}
+
+#define BLOCK_SIZE 32
+
+/**
+ * @brief Blocked matrix multiplication kernel for multiplying matrices A and B, storing the result
+ * in C.
+ *
+ * @param A Left matrix of size M x K
+ * @param B Right matrix of size K x N
+ * @param C Output matrix of size M x N
+ * @param M Size of the first dimension of A and C
+ * @param N Size of the second dimension of B and C
+ * @return void
+ */
+template <typename T>
+__global__ void matMulKernel(const T* A, const T* B, T* C, size_t M, size_t K, size_t N) {
+  __shared__ float As[BLOCK_SIZE][BLOCK_SIZE];
+  __shared__ float Bs[BLOCK_SIZE][BLOCK_SIZE];
+
+  float Cvalue = 0.0f;
+  for (size_t m = 0; m < (K + BLOCK_SIZE - 1) / BLOCK_SIZE; ++m) {
+    size_t adx = threadIdx.x + m * BLOCK_SIZE;
+    size_t ady = threadIdx.y + blockIdx.y * BLOCK_SIZE;
+    if (adx < K && ady < M)
+      As[threadIdx.y][threadIdx.x] = A[ady * K + adx];
+    else
+      As[threadIdx.y][threadIdx.x] = 0.0f;
+
+    size_t bdx = threadIdx.x + blockIdx.x * BLOCK_SIZE;
+    size_t bdy = threadIdx.y + m * BLOCK_SIZE;
+    if (bdx < N && bdy < K)
+      Bs[threadIdx.y][threadIdx.x] = B[bdy * N + bdx];
+    else
+      Bs[threadIdx.y][threadIdx.x] = 0.0f;
+
+    __syncthreads();
+    for (size_t k = 0; k < BLOCK_SIZE; ++k)
+      Cvalue += As[threadIdx.y][k] * Bs[k][threadIdx.x];
+    __syncthreads();
+  }
+  size_t cdx = threadIdx.x + blockIdx.x * BLOCK_SIZE;
+  size_t cdy = threadIdx.y + blockIdx.y * BLOCK_SIZE;
+  if (cdx < N && cdy < M)
+    C[cdy * N + cdx] = Cvalue;
+}
+
+/**
+ * @brief Host launcher for blocked matrix multiplication.
+ *
+ * @param A Left matrix of size M x K
+ * @param B Right matrix of size K x N
+ * @param C Output matrix of size M x N
+ * @param M Size of the first dimension of A and C
+ * @param N Size of the second dimension of B and C
+ * @param K Size of the shared dimension of A and B
+ * @return void
+ */
+template <typename T> void matMul(const T* A, const T* B, T* C, size_t M, size_t K, size_t N) {
+  dim3 blockDim(BLOCK_SIZE, BLOCK_SIZE);
+  dim3 gridDim((N + BLOCK_SIZE - 1) / BLOCK_SIZE, (M + BLOCK_SIZE - 1) / BLOCK_SIZE);
+  std::cout << "Launching matMulKernel with gridDim: (" << gridDim.x << ", " << gridDim.y
+            << "), blockDim: (" << blockDim.x << ", " << blockDim.y << ")" << std::endl;
+  matMulKernel<T><<<gridDim, blockDim>>>(A, B, C, M, K, N);
 }
 
 } // namespace gpu
