@@ -1,7 +1,7 @@
 #include "qr/gpuhouseholder.cuh"
 #include <cmath>
 
-namespace {
+namespace qr::gpu{
     template<typename T>
 __global__ void initBuffersKernel(const T* A, T* R_tmp, T* V, T*Q, uint32_t M, uint32_t N) {
     uint32_t idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -94,7 +94,7 @@ __global__ void applyHousholderRKernel(T* R_tmp,T* V, const T* tau, uint32_t M, 
     T* sdata = reinterpret_cast<T*>(shm_raw);
 
     T local_dot = 0;
-    for (uint32_t i = k+tid; i>M; i+=blockDim.x){
+    for (uint32_t i = k+tid; i<M; i+=blockDim.x){
         local_dot += V[i+k*M] * R_tmp[i+j*M];
     }
     sdata[tid] = local_dot;
@@ -111,7 +111,7 @@ __global__ void applyHousholderRKernel(T* R_tmp,T* V, const T* tau, uint32_t M, 
     if (tid ==0) shared_dot = sdata[0];
     __syncthreads();
 
-    for (uint32_t i = k+tid; i>M; i+=blockDim.x){
+    for (uint32_t i = k+tid; i<M; i+=blockDim.x){
         R_tmp[i+j*M] -= t_val * V[i+k*M]*shared_dot;
     }
 
@@ -161,8 +161,31 @@ __global__ void extractRKernel(const T* R_tmp, T* R, uint32_t M, uint32_t N) {
   }
 }
 
-}//namespace qr::gpu
+template <typename T>
+__global__ void correctSignsKernel(T* Q, T* R, uint32_t M, uint32_t N) {
+    uint32_t k = blockIdx.x; // One block handles one diagonal element/row/column
+    if (k >= N) return;
 
+    __shared__ bool do_flip;
+    if (threadIdx.x == 0) {
+        do_flip = (R[k + k * N] < 0);
+    }
+    __syncthreads();
+
+    if (!do_flip) return;
+
+    // Flip the k-th row of R
+    for (uint32_t j = k + threadIdx.x; j < N; j += blockDim.x) {
+        R[k + j * N] = -R[k + j * N];
+    }
+
+    // Flip the k-th column of Q
+    for (uint32_t i = threadIdx.x; i < M; i += blockDim.x) {
+        Q[i + k * M] = -Q[i + k * M];
+    }
+}
+
+}//namespace qr::gpu
 
 namespace qr::gpu {
 template<typename T>
@@ -170,6 +193,10 @@ void Householder(const T* A, T*Q, T* R, uint32_t M, uint32_t N , T* workspace) {
     T* d_R_tmp;
     T* d_V;
     T* d_tau;
+
+    cudaMalloc(&d_R_tmp, M*N * sizeof(T));
+    cudaMalloc(&d_V, M*N*sizeof(T));
+    cudaMalloc(&d_tau, N*sizeof(T));
 
     uint32_t threadsPerBlock =256;
     uint32_t blocksMN = (M*N+ threadsPerBlock -1)/threadsPerBlock;
@@ -188,6 +215,7 @@ void Householder(const T* A, T*Q, T* R, uint32_t M, uint32_t N , T* workspace) {
     for(int k = static_cast<int>(N) - 1; k>=0; --k){
         applyHousholderQKernel<<<N,threadsPerBlock,threadsPerBlock*sizeof(T)>>>(Q,d_V,d_tau,M,N,k);
     }
+    correctSignsKernel<<<N, threadsPerBlock>>>(Q, R, M, N);
 
     cudaFree(d_R_tmp);
     cudaFree(d_V);

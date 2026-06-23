@@ -37,7 +37,7 @@ target_include_directories(matdecomp_gpu_tests PRIVATE
 target_link_libraries(matdecomp_gpu_tests PRIVATE
     matdecomp::qr
     GTest::gtest_main
-    CUDA::cudart
+    CUDA::cudart_static
 )
 
 target_compile_options(matdecomp_gpu_tests PRIVATE
