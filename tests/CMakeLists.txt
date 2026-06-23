@@ -28,6 +28,7 @@ gtest_discover_tests(matdecomp_tests)
 add_executable(matdecomp_gpu_tests
     test_gpuLinalg.cu
     test_qrGpu.cu
+    test_qrGpuDetail.cu
 )
 
 target_include_directories(matdecomp_gpu_tests PRIVATE

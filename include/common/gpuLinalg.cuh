@@ -48,10 +48,12 @@ template <typename T> __device__ T _blockReduce(T val) {
   __syncthreads();
 
   if (warpId == 0) {
-    val = (threadIdx.x < blockDim.x / WARP_SIZE) ? warpSums[lane] : static_cast<T>(0);
-    val = _warpReduceSum<T>(val);
+    uint32_t num_warps = (blockDim.x + WARP_SIZE - 1) / WARP_SIZE;
+    val = (threadIdx.x < num_warps) ? warpSums[threadIdx.x] : static_cast<T>(0);
+    warpSums[0] = _warpReduceSum<T>(val);
   }
-  return val;
+  __syncthreads();
+  return warpSums[0];
 }
 
 /**
@@ -122,6 +124,20 @@ template <typename T> __global__ void scaleKernel(const T* a, T* res, size_t N, 
 }
 
 /**
+ * @brief Scales vector a by factor read from device memory.
+ *
+ * @param a Input vector to be scaled
+ * @param res Output vector to hold the scaled result
+ * @param N Number of elements in a and res
+ * @param factor Device pointer to the scaling factor (one T on device)
+ * @return void
+ */
+template <typename T>
+__global__ void scaleKernelDevice(const T* a, T* res, size_t N, const T* factor) {
+  _scale(a, res, N, *factor);
+}
+
+/**
  * @brief Normalizes vector a and stores the result in res.
  *
  * @param a Vector to be normalized
@@ -152,6 +168,12 @@ template <typename T> __global__ void scaleKernel(const T* b, T* res, size_t N, 
   uint32_t idx = threadIdx.x + blockDim.x * blockIdx.x;
   if (idx < N)
     res[idx] = b[idx] * *factor;
+}
+
+template <typename T> __global__ void sqrtKernel(const T* a, T* res, size_t N) {
+  uint32_t idx = threadIdx.x + blockDim.x * blockIdx.x;
+  if (idx < N)
+    res[idx] = sqrtf(a[idx]);
 }
 
 // ── host launchers ────────────────────────────────────────────────────────────

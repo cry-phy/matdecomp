@@ -7,6 +7,7 @@ target_sources(matdecomp_qr PRIVATE
     gpuGramSchmidt.cu
     gpuModifiedGramSchmidt.cu
     gpuhouseholder.cu
+    gpuBlockedHouseholder.cu
 )
 
 add_library(matdecomp::qr ALIAS matdecomp_qr)
