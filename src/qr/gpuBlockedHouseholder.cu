@@ -135,38 +135,8 @@ void blockTrailingUpdate(T* C, const T* V, const T* Tmat, uint32_t M, uint32_t N
   common::gpu::subtract<T>(C, C_workspace, C, static_cast<uint64_t>(M) * N);
 }
 
-template void singleReflector<float>(float*, float*, uint32_t);
-template void singleReflector<double>(double*, double*, uint32_t);
-template void unblockedPanel<float>(float*, float*, uint32_t, uint32_t, uint32_t);
-template void unblockedPanel<double>(double*, double*, uint32_t, uint32_t, uint32_t);
-template __global__ void applyReflectorKernel<float>(float*, const float*, const float*, uint32_t,
-                                                     uint32_t, uint32_t);
-template __global__ void applyReflectorKernel<double>(double*, const double*, const double*,
-                                                      uint32_t, uint32_t, uint32_t);
-template void buildTMatrix<float>(float*, float*, float*, uint32_t, uint32_t, float*);
-template void buildTMatrix<double>(double*, double*, double*, uint32_t, uint32_t, double*);
-template void blockTrailingUpdate<float>(float*, const float*, const float*, uint32_t, uint32_t,
-                                         uint32_t, float*, float*, float*);
-template void blockTrailingUpdate<double>(double*, const double*, const double*, uint32_t, uint32_t,
-                                          uint32_t, double*, double*, double*);
-
-} // namespace qr::gpu::_detail
-
-namespace qr::gpu {
-
-template <typename T> struct BlockedHouseholderWorkspace {
-  T* VWorkspace;
-  T* TWorkspace;
-  T* WWorkspace;
-  T* CWorkspace1;
-  T* CWorkspace2;
-
-  T* tauWorkspace;
-  T* TwWorkspace;
-};
-
 template <typename T>
-void blockedHouseHolder(const T* A, T* Q, T* R, uint32_t M, uint32_t N,
+void blockedFinalMatrix(const T* A, T* Q, T* R, uint32_t M, uint32_t N,
                         BlockedHouseholderWorkspace<T>&& workspace) {
   T* tau = workspace.tauWorkspace;
   T* Tmat = workspace.TWorkspace;
@@ -196,5 +166,28 @@ void blockedHouseHolder(const T* A, T* Q, T* R, uint32_t M, uint32_t N,
     }
   }
 }
+
+template void singleReflector<float>(float*, float*, uint32_t);
+template void singleReflector<double>(double*, double*, uint32_t);
+template void unblockedPanel<float>(float*, float*, uint32_t, uint32_t, uint32_t);
+template void unblockedPanel<double>(double*, double*, uint32_t, uint32_t, uint32_t);
+template __global__ void applyReflectorKernel<float>(float*, const float*, const float*, uint32_t,
+                                                     uint32_t, uint32_t);
+template __global__ void applyReflectorKernel<double>(double*, const double*, const double*,
+                                                      uint32_t, uint32_t, uint32_t);
+template void buildTMatrix<float>(float*, float*, float*, uint32_t, uint32_t, float*);
+template void buildTMatrix<double>(double*, double*, double*, uint32_t, uint32_t, double*);
+template void blockTrailingUpdate<float>(float*, const float*, const float*, uint32_t, uint32_t,
+                                         uint32_t, float*, float*, float*);
+template void blockTrailingUpdate<double>(double*, const double*, const double*, uint32_t, uint32_t,
+                                          uint32_t, double*, double*, double*);
+
+} // namespace qr::gpu::_detail
+
+namespace qr::gpu {
+
+template <typename T>
+void blockedHouseHolder(const T* A, T* Q, T* R, uint32_t M, uint32_t N,
+                        BlockedHouseholderWorkspace<T>&& workspace) {}
 
 } // namespace qr::gpu
