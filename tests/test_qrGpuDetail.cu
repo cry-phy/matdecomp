@@ -143,7 +143,7 @@ TEST(detailBlockedHouseholder, buildTMatrixTest) {
   CUDACHECK(cudaMemcpy(d_V, V, M * NB * sizeof(float), cudaMemcpyHostToDevice));
   CUDACHECK(cudaMemcpy(d_tau, tau, NB * sizeof(float), cudaMemcpyHostToDevice));
 
-  qr::gpu::_detail::buildTMatrix(d_V, d_tau, d_T, M, NB, d_ws);
+  qr::gpu::_detail::buildTMatrix(d_V, d_tau, d_T, M, NB, d_ws, M);
 
   CUDACHECK(cudaDeviceSynchronize());
 

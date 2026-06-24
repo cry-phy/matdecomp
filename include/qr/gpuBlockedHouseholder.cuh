@@ -31,7 +31,8 @@ template <typename T>
 void unblockedPanel(T* V, T* tau, uint32_t stride, uint32_t N, uint32_t M_eff);
 
 template <typename T>
-void buildTMatrix(T* V, T* tau, T* Tmat, uint32_t stride, uint32_t panelWidth, T* workspace);
+void buildTMatrix(T* V, T* tau, T* Tmat, uint32_t stride, uint32_t panelWidth, T* workspace,
+                  uint32_t ldv);
 
 template <typename T>
 void blockTrailingUpdate(T* C, const T* V, const T* Tmat, uint32_t M, uint32_t N,

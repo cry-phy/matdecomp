@@ -78,36 +78,36 @@ void unblockedPanel(T* V, T* tau, uint32_t stride, uint32_t N, uint32_t M_eff) {
 } // namespace qr::gpu::_detail
 
 template <typename T>
-void buildTMatrix(T* V, T* tau, T* Tmat, uint32_t stride, uint32_t panelWidth, T* workspace) {
+void buildTMatrix(T* V, T* tau, T* Tmat, uint32_t M, uint32_t N, T* workspace, uint32_t ldv) {
   // TODO merge into single larft kernel to avoid host-device round trips.
-  T* local_tau = new T[panelWidth];
-  CUDACHECK(cudaMemcpy(local_tau, tau, panelWidth * sizeof(T), cudaMemcpyDeviceToHost));
+  T* local_tau = new T[N];
+  CUDACHECK(cudaMemcpy(local_tau, tau, N * sizeof(T), cudaMemcpyDeviceToHost));
 
   // Cache for V's diagonal since its needed for v_j implicit unit diagonal
   T* tmp_beta;
   CUDACHECK(cudaMalloc(&tmp_beta, sizeof(T)));
 
   // Lower triangle must be zero so the triangular matvec can sum over the full j x j block.
-  CUDACHECK(cudaMemset(Tmat, 0, static_cast<uint64_t>(panelWidth) * panelWidth * sizeof(T)));
+  common::gpu::zeroBuffer(Tmat, static_cast<uint64_t>(N) * N);
 
-  for (uint32_t j = 0; j < panelWidth; ++j) {
-    T* t_col = Tmat + static_cast<uint64_t>(j) * panelWidth; // column j of T
+  for (uint32_t j = 0; j < N; ++j) {
+    T* t_col = Tmat + static_cast<uint64_t>(j) * N;
     if (std::abs(local_tau[j]) <= static_cast<T>(1e-8))
       continue;
 
     if (j > 0) {
-      T* v_diag = V + static_cast<uint64_t>(j) * stride + j;
+      T* v_diag = V + static_cast<uint64_t>(j) * ldv + j;
       CUDACHECK(cudaMemcpy(tmp_beta, v_diag, sizeof(T), cudaMemcpyDeviceToDevice));
       common::gpu::fillBuffer(v_diag, 1, static_cast<T>(1));
       for (uint32_t k = 0; k < j; ++k) {
-        T* d_vk = V + static_cast<uint64_t>(k) * stride + j;
-        common::gpu::dotProduct(d_vk, v_diag, t_col + k, stride - j);
+        T* d_vk = V + static_cast<uint64_t>(k) * ldv + j;
+        common::gpu::dotProduct(d_vk, v_diag, t_col + k, M - j);
       }
       CUDACHECK(cudaMemcpy(v_diag, tmp_beta, sizeof(T), cudaMemcpyDeviceToDevice));
 
       // w := -tau_j * w (single scalar), then T(0:j, j) := T(0:j, 0:j) * w.
       common::gpu::scale(t_col, t_col, j, -local_tau[j]);
-      common::gpu::matVecMult(Tmat, t_col, workspace, j, j, panelWidth);
+      common::gpu::matVecMult(Tmat, t_col, workspace, j, j, N);
       CUDACHECK(cudaMemcpy(t_col, workspace, static_cast<uint64_t>(j) * sizeof(T),
                            cudaMemcpyDeviceToDevice));
     }
@@ -135,38 +135,34 @@ void blockTrailingUpdate(T* C, const T* V, const T* Tmat, uint32_t M, uint32_t N
   common::gpu::subtract<T>(C, C_workspace, C, static_cast<uint64_t>(M) * N);
 }
 
-template <typename T>
-void blockedFinalMatrix(const T* A, T* Q, T* R, uint32_t M, uint32_t N,
-                        BlockedHouseholderWorkspace<T>&& workspace) {
-  T* tau = workspace.tauWorkspace;
-  T* Tmat = workspace.TWorkspace;
-  T* W = workspace.WWorkspace;
-  T* C = workspace.CWorkspace1;
-  T* C_tmp = workspace.CWorkspace2;
-
-  // Copy the current panel from A to V
-  CUDACHECK(cudaMemcpy(C, A, sizeof(T) * M * N, cudaMemcpyDeviceToDevice));
-  for (uint32_t k = 0; k < N; k += workspace.panelWidth) {
-    uint32_t panelWidth = std::min(workspace.panelWidth, N - k);
-    uint32_t panelHeight = M - k;
-
-    T* V = C + static_cast<uint64_t>(k) * M + k; // current panel in C, starting at row k, column k.
-
-    // Step 1: Factor the panel in place.
-    _detail::unblockedPanel(V, tau, M, panelWidth, panelHeight);
-
-    // Step 2: Build the T matrix
-    _detail::buildTMatrix(V, tau, Tmat, panelHeight, panelWidth, workspace.TwWorkspace);
-
-    // Step 3: Update the trailing matrix
-    if (k + panelWidth < N) {
-      T* C = const_cast<T*>(A) + static_cast<uint64_t>(k) * M + k + panelWidth; // Trailing matrix
-      _detail::blockTrailingUpdate(C, V, Tmat, panelHeight, N - k - panelWidth, panelWidth, W,
-                                   C_tmp);
-    }
-  }
-}
-
+// template <typename T>
+// void blockedFinalMatrix(const T* A, T* Q, T* R, uint32_t M, uint32_t N,
+//                         BlockedHouseholderWorkspace<T>&& workspace) {
+//   // Copy the current panel from A to V
+//   CUDACHECK(cudaMemcpy(C, A, sizeof(T) * M * N, cudaMemcpyDeviceToDevice));
+//   for (uint32_t k = 0; k < N; k += workspace.panelWidth) {
+//     uint32_t panelWidth = std::min(workspace.panelWidth, N - k);
+//     uint32_t panelHeight = M - k;
+//
+//     T* V = C + static_cast<uint64_t>(k) * M + k; // current panel in C, starting at row k, column
+//     k.
+//
+//     // Step 1: Factor the panel in place.
+//     _detail::unblockedPanel(V, tau, M, panelWidth, panelHeight);
+//
+//     // Step 2: Build the T matrix
+//     _detail::buildTMatrix(V, tau, Tmat, panelHeight, panelWidth, workspace.TwWorkspace);
+//
+//     // Step 3: Update the trailing matrix
+//     if (k + panelWidth < N) {
+//       T* C = const_cast<T*>(A) + static_cast<uint64_t>(k) * M + k + panelWidth; // Trailing
+//       matrix _detail::blockTrailingUpdate(C, V, Tmat, panelHeight, N - k - panelWidth,
+//       panelWidth, W,
+//                                    C_tmp);
+//     }
+//   }
+// }
+//
 template void singleReflector<float>(float*, float*, uint32_t);
 template void singleReflector<double>(double*, double*, uint32_t);
 template void unblockedPanel<float>(float*, float*, uint32_t, uint32_t, uint32_t);
@@ -175,8 +171,9 @@ template __global__ void applyReflectorKernel<float>(float*, const float*, const
                                                      uint32_t, uint32_t);
 template __global__ void applyReflectorKernel<double>(double*, const double*, const double*,
                                                       uint32_t, uint32_t, uint32_t);
-template void buildTMatrix<float>(float*, float*, float*, uint32_t, uint32_t, float*);
-template void buildTMatrix<double>(double*, double*, double*, uint32_t, uint32_t, double*);
+template void buildTMatrix<float>(float*, float*, float*, uint32_t, uint32_t, float*, uint32_t);
+template void buildTMatrix<double>(double*, double*, double*, uint32_t, uint32_t, double*,
+                                   uint32_t);
 template void blockTrailingUpdate<float>(float*, const float*, const float*, uint32_t, uint32_t,
                                          uint32_t, float*, float*, float*);
 template void blockTrailingUpdate<double>(double*, const double*, const double*, uint32_t, uint32_t,
