@@ -17,4 +17,9 @@
 !benchmarks/
 !benchmarks/**
 
+# Plotting scripts are tracked; the venv and generated PNGs are not.
+!plot/
+!plot/plot_benchmarks.py
+!plot/requirements.txt
+
 !**/CMakeLists.txt
