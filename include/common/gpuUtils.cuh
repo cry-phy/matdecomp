@@ -2,6 +2,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cuda_runtime.h>
+#include <iostream>
 
 namespace common {
 
@@ -31,11 +32,20 @@ inline void cuda_check(cudaError_t error_code, const char* file, int line) {
     exit(error_code);
   }
 }
-template <typename T> __device__ void fillBuffer(T* buffer, size_t N, T value) {
-  uint32_t idx = threadIdx.x + blockDim.x * blockIdx.x;
+template <typename T> __global__ void fillBufferKernel(T* buffer, uint64_t N, T value) {
+  uint64_t idx = threadIdx.x + blockDim.x * blockIdx.x;
   if (idx < N) {
     buffer[idx] = value;
   }
+}
+
+template <typename T> void fillBuffer(T* buffer, uint64_t N, T value) {
+  const uint32_t threadsPerBlock = std::min(static_cast<uint32_t>(256), static_cast<uint32_t>(N));
+  uint32_t blocks = (N + threadsPerBlock - 1) / threadsPerBlock;
+  std::cout << "Filling buffer with " << N << " elements using " << blocks << " blocks of "
+            << threadsPerBlock << " threads each." << std::endl;
+  fillBufferKernel<<<blocks, threadsPerBlock>>>(buffer, N, value);
+  CUDACHECK(cudaGetLastError());
 }
 
 /**
@@ -46,7 +56,7 @@ template <typename T> __device__ void fillBuffer(T* buffer, size_t N, T value) {
  * @param N Number of elements in the buffer
  * @return void
  */
-template <typename T> __device__ void zeroBuffer(T* buffer, size_t N) {
+template <typename T> void zeroBuffer(T* buffer, uint64_t N) {
   fillBuffer(buffer, N, static_cast<T>(0.0f));
 }
 
@@ -57,8 +67,8 @@ template <typename T> __device__ void zeroBuffer(T* buffer, size_t N) {
  * @param N Number of elements in the buffer
  * @return void
  */
-template <typename T> __global__ void randomFill(T* buffer, size_t N) {
-  uint32_t idx = threadIdx.x + blockDim.x * blockIdx.x;
+template <typename T> __global__ void randomFill(T* buffer, uint64_t N) {
+  uint64_t idx = threadIdx.x + blockDim.x * blockIdx.x;
   if (idx < N) {
     // Simple LCG for random number generation
     uint32_t state = idx + 1;                                         // Avoid zero state
@@ -75,8 +85,8 @@ template <typename T> __global__ void randomFill(T* buffer, size_t N) {
  * @param N number of elements to copy
  * @return void
  */
-template <typename T> __global__ void copyBuffer(const T* src, T* dst, size_t N) {
-  uint32_t idx = threadIdx.x + blockDim.x * blockIdx.x;
+template <typename T> __global__ void copyBuffer(const T* src, T* dst, uint64_t N) {
+  uint64_t idx = threadIdx.x + blockDim.x * blockIdx.x;
   if (idx < N) {
     dst[idx] = src[idx];
   }

@@ -18,10 +18,6 @@ TEST(detailBlockedHouseholder, singleReflectorTest) {
   float tau;
   CUDACHECK(cudaMemcpy(&tau, d_tau, sizeof(float), cudaMemcpyDeviceToHost));
 
-  // Correct expected value: tau = (beta - v[0]) / beta
-  // norm(v[1:]) = √39 ≈ 6.245
-  // beta = -√(16 + 39) = -√55 ≈ -7.416
-  // tau = (-7.416 - 4) / -7.416 ≈ 1.539
   EXPECT_NEAR(tau, 1.5393598900f, 1e-5f);
 
   CUDACHECK(cudaFree(d_tau));
@@ -50,17 +46,11 @@ TEST(detailBlockedHouseholder, applyReflectorKernelTest) {
 
   CUDACHECK(cudaMemcpy(C, d_C, M * N * sizeof(float), cudaMemcpyDeviceToHost));
 
-  // Column 0 after reflector:
-  // w_c = 1*1 + 2*2 + 3*3 + 4*4 = 30
-  // C[:,0] = [1,2,3,4] - (-0.5)*[1,2,3,4]*30 = [1,2,3,4] + [15,30,45,60] = [16,32,48,64]
   EXPECT_NEAR(C[0], 16.0f, 1e-5f);
   EXPECT_NEAR(C[1], 32.0f, 1e-5f);
   EXPECT_NEAR(C[2], 48.0f, 1e-5f);
   EXPECT_NEAR(C[3], 64.0f, 1e-5f);
 
-  // Column 1 after reflector:
-  // w_c = 1*5 + 2*6 + 3*7 + 4*8 = 70
-  // C[:,1] = [5,6,7,8] - (-0.5)*[1,2,3,4]*70 = [5,6,7,8] + [35,70,105,140] = [40,76,112,148]
   EXPECT_NEAR(C[4], 40.0f, 1e-5f);
   EXPECT_NEAR(C[5], 76.0f, 1e-5f);
   EXPECT_NEAR(C[6], 112.0f, 1e-5f);
@@ -71,9 +61,6 @@ TEST(detailBlockedHouseholder, applyReflectorKernelTest) {
   CUDACHECK(cudaFree(d_tau));
 }
 
-// ── Test 3: unblockedPanel (full QR validation) ──────────────────────────────
-// Computes reflectors, builds Q, extracts R from the packed V, and verifies both
-// that Q is orthogonal and that Q*R reconstructs the original A.
 TEST(detailBlockedHouseholder, unblockedPanelFullTest) {
   const int M = 7;
   const int N = 4;
@@ -94,7 +81,8 @@ TEST(detailBlockedHouseholder, unblockedPanelFullTest) {
 
   // Step 1: factor the panel in place. After this, V holds R in its upper triangle
   // (diagonal = beta) and the essential reflector vectors below the diagonal.
-  qr::gpu::_detail::unblockedPanel(d_V, d_tau, M, N);
+  // Dense panel: memory stride == effective height == M.
+  qr::gpu::_detail::unblockedPanel(d_V, d_tau, M /*stride*/, N, M /*M_eff*/);
   CUDACHECK(cudaDeviceSynchronize());
 
   // Step 2: build Q = H_0 · H_1 · ... · H_{N-1} from identity.
@@ -138,4 +126,42 @@ TEST(detailBlockedHouseholder, unblockedPanelFullTest) {
   CUDACHECK(cudaFree(d_V));
   CUDACHECK(cudaFree(d_tau));
   CUDACHECK(cudaFree(d_Q));
+}
+
+TEST(detailBlockedHouseholder, buildTMatrixTest) {
+  const int M = 4, NB = 3;
+  float V[M * NB] = {7.0f, 2.0f, -1.0f, 1.0f,  // col 0: diag, then v0 below
+                     4.0f, 9.0f, 3.0f,  -2.0f, // col 1: R, diag, then v1 below
+                     5.0f, 6.0f, 11.0f, 2.0f}; // col 2: R, R, diag, then v2 below
+  float tau[NB] = {0.5f, 0.25f, 0.5f};
+
+  float *d_V, *d_tau, *d_T, *d_ws;
+  CUDACHECK(cudaMalloc(&d_V, M * NB * sizeof(float)));
+  CUDACHECK(cudaMalloc(&d_tau, NB * sizeof(float)));
+  CUDACHECK(cudaMalloc(&d_T, NB * NB * sizeof(float)));
+  CUDACHECK(cudaMalloc(&d_ws, NB * sizeof(float)));
+  CUDACHECK(cudaMemcpy(d_V, V, M * NB * sizeof(float), cudaMemcpyHostToDevice));
+  CUDACHECK(cudaMemcpy(d_tau, tau, NB * sizeof(float), cudaMemcpyHostToDevice));
+
+  qr::gpu::_detail::buildTMatrix(d_V, d_tau, d_T, M, NB, d_ws);
+
+  CUDACHECK(cudaDeviceSynchronize());
+
+  float T_host[NB * NB];
+  CUDACHECK(cudaMemcpy(T_host, d_T, NB * NB * sizeof(float), cudaMemcpyDeviceToHost));
+
+  // Expected upper triangle (column-major, leading dim NB). The lower triangle is
+  // not checked: the contract only defines the upper-triangular part of T.
+  const float expected[NB * NB] = {0.5f,     0.0f,   0.0f,  // col 0
+                                   0.375f,   0.25f,  0.0f,  // col 1
+                                   -0.0625f, 0.125f, 0.5f}; // col 2
+  for (int j = 0; j < NB; ++j)
+    for (int i = 0; i <= j; ++i)
+      EXPECT_NEAR(T_host[i + j * NB], expected[i + j * NB], 1e-5f)
+          << "T(" << i << "," << j << ") mismatch";
+
+  CUDACHECK(cudaFree(d_V));
+  CUDACHECK(cudaFree(d_tau));
+  CUDACHECK(cudaFree(d_T));
+  CUDACHECK(cudaFree(d_ws));
 }

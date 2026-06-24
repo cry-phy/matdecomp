@@ -12,7 +12,7 @@ template <typename T> inline void fillRandom(T* buffer, size_t size) {
   }
 }
 
-// Frobenius norm of (QᵀQ - I). Computes all N² entries to avoid reading
+// Frobenius norm of (Q^T Q - I). Computes all N^2 entries to avoid reading
 // uninitialised memory from a partial fill.
 template <typename T> inline T orthogonalityError(const T* Q, size_t M, size_t N) {
   T error = T(0);

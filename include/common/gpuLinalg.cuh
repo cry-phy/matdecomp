@@ -1,4 +1,5 @@
 #pragma once
+#include <algorithm>
 #include <cassert>
 #include <cmath>
 #include <cstddef>
@@ -65,8 +66,8 @@ template <typename T> __device__ T _blockReduce(T val) {
  * @param factor Scaling factor
  * @return void
  */
-template <typename T> __device__ void _scale(const T* a, T* res, size_t N, T factor) {
-  uint32_t idx = threadIdx.x + blockDim.x * blockIdx.x;
+template <typename T> __device__ void _scale(const T* a, T* res, uint64_t N, T factor) {
+  uint64_t idx = threadIdx.x + blockDim.x * blockIdx.x;
   if (idx < N)
     res[idx] = a[idx] * factor;
 }
@@ -82,8 +83,8 @@ template <typename T> __device__ void _scale(const T* a, T* res, size_t N, T fac
  * @param N Number of elements in a, b, and res
  * @return void
  */
-template <typename T> __global__ void subtractKernel(const T* a, const T* b, T* res, size_t N) {
-  uint32_t idx = threadIdx.x + blockDim.x * blockIdx.x;
+template <typename T> __global__ void subtractKernel(const T* a, const T* b, T* res, uint64_t N) {
+  uint64_t idx = threadIdx.x + blockDim.x * blockIdx.x;
   if (idx < N)
     res[idx] = a[idx] - b[idx];
 }
@@ -119,7 +120,7 @@ template <typename T> __global__ void dotProductKernel(const T* a, const T* b, T
  * @param factor Scaling factor
  * @return void
  */
-template <typename T> __global__ void scaleKernel(const T* a, T* res, size_t N, T factor) {
+template <typename T> __global__ void scaleKernel(const T* a, T* res, uint64_t N, T factor) {
   _scale(a, res, N, factor);
 }
 
@@ -133,7 +134,7 @@ template <typename T> __global__ void scaleKernel(const T* a, T* res, size_t N, 
  * @return void
  */
 template <typename T>
-__global__ void scaleKernelDevice(const T* a, T* res, size_t N, const T* factor) {
+__global__ void scaleKernelDevice(const T* a, T* res, uint64_t N, const T* factor) {
   _scale(a, res, N, *factor);
 }
 
@@ -164,14 +165,14 @@ __global__ void normalizeKernel(const T* a, T* res, const T* normSq, uint32_t N)
  * @param factor Scaling factor read from device memory (one T on device)
  * @return void
  */
-template <typename T> __global__ void scaleKernel(const T* b, T* res, size_t N, const T* factor) {
-  uint32_t idx = threadIdx.x + blockDim.x * blockIdx.x;
+template <typename T> __global__ void scaleKernel(const T* b, T* res, uint64_t N, const T* factor) {
+  uint64_t idx = threadIdx.x + blockDim.x * blockIdx.x;
   if (idx < N)
     res[idx] = b[idx] * *factor;
 }
 
-template <typename T> __global__ void sqrtKernel(const T* a, T* res, size_t N) {
-  uint32_t idx = threadIdx.x + blockDim.x * blockIdx.x;
+template <typename T> __global__ void sqrtKernel(const T* a, T* res, uint64_t N) {
+  uint64_t idx = threadIdx.x + blockDim.x * blockIdx.x;
   if (idx < N)
     res[idx] = sqrtf(a[idx]);
 }
@@ -187,7 +188,7 @@ template <typename T> __global__ void sqrtKernel(const T* a, T* res, size_t N) {
  * @param N Number of elements in a, b, and res
  * @return void
  */
-template <typename T> void subtract(const T* a, const T* b, T* res, size_t N) {
+template <typename T> void subtract(const T* a, const T* b, T* res, uint64_t N) {
   uint32_t blockSize = MAX_BLOCK_SIZE;
   uint32_t numBlocks = (N + blockSize - 1) / blockSize;
   subtractKernel<T><<<numBlocks, blockSize>>>(a, b, res, N);
@@ -219,7 +220,7 @@ template <typename T> void dotProduct(const T* a, const T* b, T* res, uint32_t N
  * @param factor Scaling factor
  * @return void
  */
-template <typename T> void scale(const T* a, T* res, size_t N, T factor) {
+template <typename T> void scale(const T* a, T* res, uint64_t N, T factor) {
   uint32_t blockSize = MAX_BLOCK_SIZE;
   uint32_t numBlocks = (N + blockSize - 1) / blockSize;
   scaleKernel<T><<<numBlocks, blockSize>>>(a, res, N, factor);
@@ -255,7 +256,7 @@ template <typename T> void normalize(const T* a, T* res, uint32_t N, T* d_normSq
  * @param d_dot_ab Device pointer to store the dot product of a and b (one T on device)
  * @return void
  */
-template <typename T> void project(const T* a, const T* b, T* res, size_t N, T* d_dot_ab) {
+template <typename T> void project(const T* a, const T* b, T* res, uint32_t N, T* d_dot_ab) {
   uint32_t blockSize = MAX_BLOCK_SIZE;
   uint32_t numBlocks =
       (N + blockSize * INIT_REDUCTION_COUNT - 1) / (blockSize * INIT_REDUCTION_COUNT);
@@ -278,36 +279,45 @@ template <typename T> void project(const T* a, const T* b, T* res, size_t N, T* 
  * @param N Size of the second dimension of B and C
  * @return void
  */
-template <typename T>
-__global__ void matMulKernel(const T* A, const T* B, T* C, size_t M, size_t K, size_t N) {
-  __shared__ float As[BLOCK_SIZE][BLOCK_SIZE];
-  __shared__ float Bs[BLOCK_SIZE][BLOCK_SIZE];
+template <typename T, bool tA = false, bool tB = false>
+__global__ void __launch_bounds__(BLOCK_SIZE* BLOCK_SIZE)
+    matMulKernel(const T* A, const T* B, T* C, uint32_t M, uint32_t K, uint32_t N) {
+  __shared__ T As[BLOCK_SIZE][BLOCK_SIZE];
+  __shared__ T Bs[BLOCK_SIZE][BLOCK_SIZE];
 
-  float Cvalue = 0.0f;
-  for (size_t m = 0; m < (K + BLOCK_SIZE - 1) / BLOCK_SIZE; ++m) {
-    size_t adx = threadIdx.x + m * BLOCK_SIZE;
-    size_t ady = threadIdx.y + blockIdx.y * BLOCK_SIZE;
-    if (adx < K && ady < M)
-      As[threadIdx.y][threadIdx.x] = A[ady * K + adx];
-    else
-      As[threadIdx.y][threadIdx.x] = 0.0f;
+  uint32_t row = blockIdx.y * BLOCK_SIZE + threadIdx.y;
+  uint32_t col = blockIdx.x * BLOCK_SIZE + threadIdx.x;
 
-    size_t bdx = threadIdx.x + blockIdx.x * BLOCK_SIZE;
-    size_t bdy = threadIdx.y + m * BLOCK_SIZE;
-    if (bdx < N && bdy < K)
-      Bs[threadIdx.y][threadIdx.x] = B[bdy * N + bdx];
-    else
-      Bs[threadIdx.y][threadIdx.x] = 0.0f;
+  T Cvalue = static_cast<T>(0);
+  for (uint32_t m = 0; m < (K + BLOCK_SIZE - 1) / BLOCK_SIZE; ++m) {
+    uint32_t aCol = m * BLOCK_SIZE + threadIdx.x;
+    if (row < M && aCol < K) {
+      if constexpr (tA)
+        As[threadIdx.y][threadIdx.x] = A[static_cast<uint64_t>(row) * K + aCol];
+      else
+        As[threadIdx.y][threadIdx.x] = A[static_cast<uint64_t>(aCol) * M + row];
+    } else {
+      As[threadIdx.y][threadIdx.x] = static_cast<T>(0);
+    }
+
+    uint32_t bRow = m * BLOCK_SIZE + threadIdx.y;
+    if (bRow < K && col < N) {
+      if constexpr (tB)
+        Bs[threadIdx.y][threadIdx.x] = B[static_cast<uint64_t>(bRow) * N + col];
+      else
+        Bs[threadIdx.y][threadIdx.x] = B[static_cast<uint64_t>(col) * K + bRow];
+    } else {
+      Bs[threadIdx.y][threadIdx.x] = static_cast<T>(0);
+    }
 
     __syncthreads();
-    for (size_t k = 0; k < BLOCK_SIZE; ++k)
+    for (uint32_t k = 0; k < BLOCK_SIZE; ++k)
       Cvalue += As[threadIdx.y][k] * Bs[k][threadIdx.x];
     __syncthreads();
   }
-  size_t cdx = threadIdx.x + blockIdx.x * BLOCK_SIZE;
-  size_t cdy = threadIdx.y + blockIdx.y * BLOCK_SIZE;
-  if (cdx < N && cdy < M)
-    C[cdy * N + cdx] = Cvalue;
+
+  if (row < M && col < N)
+    C[static_cast<uint64_t>(col) * M + row] = Cvalue; // C stored M x N (ld = M)
 }
 
 /**
@@ -321,12 +331,89 @@ __global__ void matMulKernel(const T* A, const T* B, T* C, size_t M, size_t K, s
  * @param K Size of the shared dimension of A and B
  * @return void
  */
-template <typename T> void matMul(const T* A, const T* B, T* C, size_t M, size_t K, size_t N) {
+template <typename T, bool tA = false, bool tB = false>
+void matMul(const T* A, const T* B, T* C, uint32_t M, uint32_t K, uint32_t N) {
   dim3 blockDim(BLOCK_SIZE, BLOCK_SIZE);
   dim3 gridDim((N + BLOCK_SIZE - 1) / BLOCK_SIZE, (M + BLOCK_SIZE - 1) / BLOCK_SIZE);
-  std::cout << "Launching matMulKernel with gridDim: (" << gridDim.x << ", " << gridDim.y
-            << "), blockDim: (" << blockDim.x << ", " << blockDim.y << ")" << std::endl;
-  matMulKernel<T><<<gridDim, blockDim>>>(A, B, C, M, K, N);
+  matMulKernel<T, tA, tB><<<gridDim, blockDim>>>(A, B, C, M, K, N);
+}
+
+/**
+ * @brief Performs matrix-vector multiplication of matrix A and vector x, storing the result in y.
+ *
+ * @param A Input matrix of size M x N
+ * @param x Input vector of size N
+ * @param y Output vector of size M
+ * @param M Number of rows in A and size of y
+ * @param N Number of columns in A and size of x
+ * @param lda Leading dimension of A (number of rows)
+ * @return void
+ */
+template <typename T>
+__global__ void matVecMultKernel(const T* A, const T* x, T* y, uint32_t M, uint32_t N,
+                                 uint32_t lda) {
+  uint32_t row = blockIdx.x;
+  if (row >= M)
+    return;
+
+  T tsum = static_cast<T>(0);
+  for (uint32_t col = threadIdx.x; col < N; col += blockDim.x) {
+    tsum += A[static_cast<uint64_t>(col) * lda + row] * x[col];
+  }
+
+  T result = _blockReduce(tsum);
+  if (threadIdx.x == 0)
+    y[row] = result;
+}
+
+/**
+ * @brief Host launcher for matrix-vector multiplication.
+ *
+ * @param A Input matrix of size M x N
+ * @param x Input vector of size N
+ * @param y Output vector of size M
+ * @param M Number of rows in A and size of y
+ * @param N Number of columns in A and size of x
+ * @param lda Leading dimension of A (number of rows)
+ * @return void
+ */
+template <typename T>
+void matVecMult(const T* A, const T* x, T* y, uint32_t M, uint32_t N, uint32_t lda) {
+  // Round the block up to a full warp so _blockReduce never shuffles across absent lanes.
+  uint32_t blockDim =
+      std::min<uint32_t>(MAX_BLOCK_SIZE, ((N + WARP_SIZE - 1) / WARP_SIZE) * WARP_SIZE);
+  matVecMultKernel<T><<<M, blockDim>>>(A, x, y, M, N, lda);
+}
+
+/**
+ * @brief Scales vector a by factors read from device memory, storing the result in res.
+ *
+ * @param a Input vector to be scaled
+ * @param res Output vector to hold the scaled result
+ * @param N Number of elements in a and res
+ * @param factors Device pointer to the scaling factors (one T per element on device)
+ * @return void
+ */
+template <typename T>
+__global__ void scalePerElementKernel(const T* a, T* res, uint64_t N, const T* factors) {
+  uint64_t idx = threadIdx.x + blockDim.x * blockIdx.x;
+  if (idx < N)
+    res[idx] = a[idx] * factors[idx];
+}
+
+/**
+ * @brief Scales vector a by factors read from device memory, storing the result in res.
+ *
+ * @param a Input vector to be scaled
+ * @param res Output vector to hold the scaled result
+ * @param N Number of elements in a and res
+ * @param factors Device pointer to the scaling factors (one T per element on device)
+ * @return void
+ */
+template <typename T> void scalePerElement(const T* a, T* res, uint64_t N, const T* factors) {
+  uint32_t blockDim = MAX_BLOCK_SIZE;
+  uint32_t gridDim = (N + blockDim - 1) / blockDim;
+  scalePerElementKernel<T><<<gridDim, blockDim>>>(a, res, N, factors);
 }
 
 } // namespace gpu
