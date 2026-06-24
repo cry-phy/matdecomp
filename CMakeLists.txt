@@ -9,7 +9,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# CUDA architecture — sm_86 = RTX 30xx / A-series (this machine's RTX 3070 Ti).
+# CUDA architecture — sm_86 = RTX 30xx / A-series
 # Override at configure time: cmake -DCMAKE_CUDA_ARCHITECTURES=89 ..
 set(CMAKE_CUDA_ARCHITECTURES 86 CACHE STRING "CUDA GPU architecture (sm_XX without 'sm_')")
 
@@ -21,12 +21,6 @@ set(MATDECOMP_WARNING_FLAGS
     -Wno-unused-parameter
 )
 
-# CUDA warning flags — -Wpedantic is excluded because NVCC's intermediate code
-# emits `# linenum file` line directives (a GCC extension) that trigger it on
-# the host compiler pass, producing noise unrelated to user code.
-# --ptxas-options=-v prints per-kernel register/shared-memory usage at compile
-# time, making register-pressure launch failures visible before they silently
-# produce all-zero output at runtime.
 set(MATDECOMP_CUDA_WARNING_FLAGS
     -Wall
     -Wextra
@@ -56,8 +50,6 @@ set(MATDECOMP_RELEASE_FLAGS
     -ffp-contract=fast    # fuse multiply-add into FMA instructions
 )
 
-# Pass extra flags at configure time, e.g.
-#   cmake -DMATDECOMP_EXTRA_FLAGS="-funroll-loops;-fprofile-use=perf.data" ..
 set(MATDECOMP_EXTRA_FLAGS "" CACHE STRING
     "Additional compiler flags appended to all build types (semicolon-separated)")
 separate_arguments(MATDECOMP_EXTRA_FLAGS_LIST UNIX_COMMAND "${MATDECOMP_EXTRA_FLAGS}")

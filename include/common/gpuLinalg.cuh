@@ -365,7 +365,7 @@ __global__ void __launch_bounds__(BLOCK_SIZE* BLOCK_SIZE)
   }
 
   if (row < M && col < N)
-    C[static_cast<uint64_t>(col) * ldC + row] = Cvalue; // C stored M x N (ld = M)
+    C[static_cast<uint64_t>(col) * ldC + row] = Cvalue;
 }
 
 /**
@@ -440,8 +440,7 @@ void matVecMult(const T* A, const T* x, T* y, uint32_t M, uint32_t N, uint32_t l
 }
 
 /**
- * @brief Rank-1 update (GER): A -= x ⊗ y, i.e. A[:, c] -= x * y[c] for every column c. Updates A in
- * place; no temporary outer product is materialized.
+ * @brief Rank-1 update
  *
  * @param x Column vector of length M
  * @param y Row vector of length N
@@ -460,7 +459,7 @@ __global__ void gerKernel(const T* x, const T* y, T* A, uint32_t M, uint32_t N, 
 }
 
 /**
- * @brief Host launcher for the rank-1 update A -= x ⊗ y.
+ * @brief Host launcher for the rank-1 update
  *
  * @param x Column vector of length M
  * @param y Row vector of length N
@@ -470,8 +469,7 @@ __global__ void gerKernel(const T* x, const T* y, T* A, uint32_t M, uint32_t N, 
  * @param lda Leading dimension of A
  * @return void
  */
-template <typename T>
-void ger(const T* x, const T* y, T* A, uint32_t M, uint32_t N, uint32_t lda) {
+template <typename T> void ger(const T* x, const T* y, T* A, uint32_t M, uint32_t N, uint32_t lda) {
   dim3 blockDim(16, 16);
   dim3 gridDim((N + blockDim.x - 1) / blockDim.x, (M + blockDim.y - 1) / blockDim.y);
   gerKernel<T><<<gridDim, blockDim>>>(x, y, A, M, N, lda);
@@ -503,8 +501,7 @@ __global__ void scatterStridedKernel(const T* src, T* dst, uint32_t n, uint32_t 
  * @param stride Stride in elements between consecutive destination writes
  * @return void
  */
-template <typename T>
-void scatterStrided(const T* src, T* dst, uint32_t n, uint32_t stride) {
+template <typename T> void scatterStrided(const T* src, T* dst, uint32_t n, uint32_t stride) {
   uint32_t blockSize = MAX_BLOCK_SIZE;
   uint32_t numBlocks = (n + blockSize - 1) / blockSize;
   scatterStridedKernel<T><<<numBlocks, blockSize>>>(src, dst, n, stride);
