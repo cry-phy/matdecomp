@@ -153,4 +153,31 @@ inline void matMul(const T* A, size_t AM, size_t AN, const T* B, size_t BM, size
   }
 }
 
+/**
+ * @brief Transposes a matrix A and stores the result in res. Unoptimized.
+ *
+ * @param A Input matrix A, stored column-major with leading dimension AM
+ * @param res Output transposed matrix, stored column-major with leading dimension AN
+ * @param AM Number of rows in A
+ * @param AN Number of columns in A
+ * @return Transposed matrix res = A^T, where A is AM×AN and res is AN×AM.
+ */
+template <typename T> inline void transpose(const T* A, T* res, size_t AM, size_t AN) {
+  for (size_t i = 0; i < AM; i++) {
+    for (size_t j = 0; j < AN; j++) {
+      res[j + i * AN] = A[i + j * AM];
+    }
+  }
+}
+
+template <typename T> inline void matVecMul(const T* A, const T* x, T* res, size_t AM, size_t AN) {
+  for (size_t i = 0; i < AM; i++) {
+    T sum = 0;
+    for (size_t j = 0; j < AN; j++) {
+      sum += A[i + j * AM] * x[j];
+    }
+    res[i] = sum;
+  }
+}
+
 } // namespace common::cpu

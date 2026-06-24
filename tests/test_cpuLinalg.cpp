@@ -51,3 +51,19 @@ TEST(CpuLinalgTest, Scale) {
   EXPECT_NEAR(result[0], 3.0f, std::numeric_limits<float>::epsilon());
   EXPECT_NEAR(result[1], 6.0f, std::numeric_limits<float>::epsilon());
 }
+
+TEST(CpuLinalgTest, IsClose) {
+  float a[] = {1.0f, 2.0f};
+  float b[] = {1.0f + 1e-6f, 2.0f - 1e-6f};
+  EXPECT_TRUE(common::cpu::isClose(a, b, 2, 1e-5f));
+  EXPECT_FALSE(common::cpu::isClose(a, b, 2, 1e-7f));
+}
+
+TEST(CpuLinalgTest, matVecMul) {
+  float A[] = {1.0f, 2.0f, 3.0f, 4.0f}; // 2x2 matrix
+  float x[] = {1.0f, 2.0f};             // 2x1 vector
+  float res[2];
+  common::cpu::matVecMul(A, x, res, 2, 2);
+  EXPECT_NEAR(res[0], 7.0f, std::numeric_limits<float>::epsilon());
+  EXPECT_NEAR(res[1], 10.0f, std::numeric_limits<float>::epsilon());
+}
