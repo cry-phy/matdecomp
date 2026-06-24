@@ -195,6 +195,52 @@ template <typename T> void subtract(const T* a, const T* b, T* res, uint64_t N) 
 }
 
 /**
+ * @brief Performs element-wise subtraction of two matrices A and B. Allows for different leading
+ * dimensions (ldA, ldB, ldRes) for each matrix.
+ *
+ * @param A Matrix A of size M x N, stored in column-major with ldA
+ * @param B Matrix B of size M x N, stored in column-major with ldB
+ * @param res Output matrix to hold the result of A - B, stored in column-major with ldRes
+ * @param M dimension 1 of the matrices
+ * @param N dimension 2 of the matrices
+ * @param ldA leading dimension of A (number of rows)
+ * @param ldB leading dimension of B (number of rows)
+ * @param ldRes leading dimension of res (number of rows)
+ * @return value
+ */
+template <typename T>
+__global__ void subtractMatrixKernel(const T* A, const T* B, T* res, uint32_t M, uint32_t N,
+                                     uint32_t ldA, uint32_t ldB, uint32_t ldRes) {
+  uint32_t row = blockIdx.y * blockDim.y + threadIdx.y;
+  uint32_t col = blockIdx.x * blockDim.x + threadIdx.x;
+
+  if (row < M && col < N) {
+    res[row + col * ldRes] = A[row + col * ldA] - B[row + col * ldB];
+  }
+}
+
+/**
+ * @brief Host launcher for element-wise subtraction of two matrices A and B.
+ *
+ * @param A Matrix A of size M x N, stored in column-major with ldA
+ * @param B Matrix B of size M x N, stored in column-major with ldB
+ * @param res Output matrix to hold the result of A - B, stored in column-major with ldRes
+ * @param M dimension 1 of the matrices
+ * @param N dimension 2 of the matrices
+ * @param ldA leading dimension of A (number of rows)
+ * @param ldB leading dimension of B (number of rows)
+ * @param ldRes leading dimension of res (number of rows)
+ * @return void
+ */
+template <typename T>
+void subtractMatrix(const T* A, const T* B, T* res, uint32_t M, uint32_t N, uint32_t ldA,
+                    uint32_t ldB, uint32_t ldRes) {
+  dim3 blockDim(16, 16);
+  dim3 gridDim((N + blockDim.x - 1) / blockDim.x, (M + blockDim.y - 1) / blockDim.y);
+  subtractMatrixKernel<T><<<gridDim, blockDim>>>(A, B, res, M, N, ldA, ldB, ldRes);
+}
+
+/**
  * @brief Performs the dot product of two vectors a and b, storing the result in res.
  *
  * @param a Input vector a
@@ -206,7 +252,8 @@ template <typename T> void subtract(const T* a, const T* b, T* res, uint64_t N) 
 template <typename T> void dotProduct(const T* a, const T* b, T* res, uint32_t N) {
   uint32_t blockSize = MAX_BLOCK_SIZE;
   uint32_t numBlocks =
-      (N + blockSize * INIT_REDUCTION_COUNT - 1) / (blockSize * INIT_REDUCTION_COUNT);
+      std::max(static_cast<uint32_t>(1),
+               (N + blockSize * INIT_REDUCTION_COUNT - 1) / (blockSize * INIT_REDUCTION_COUNT));
   cudaMemset(res, 0, sizeof(T));
   dotProductKernel<T><<<numBlocks, blockSize>>>(a, b, res, N);
 }
@@ -351,7 +398,7 @@ void matMul(const T* A, const T* B, T* C, uint32_t M, uint32_t K, uint32_t N, ui
  * @param lda Leading dimension of A (number of rows)
  * @return void
  */
-template <typename T>
+template <typename T, bool tA = false>
 __global__ void matVecMultKernel(const T* A, const T* x, T* y, uint32_t M, uint32_t N,
                                  uint32_t lda) {
   uint32_t row = blockIdx.x;
@@ -359,8 +406,13 @@ __global__ void matVecMultKernel(const T* A, const T* x, T* y, uint32_t M, uint3
     return;
 
   T tsum = static_cast<T>(0);
+  uint64_t idx = 0;
   for (uint32_t col = threadIdx.x; col < N; col += blockDim.x) {
-    tsum += A[static_cast<uint64_t>(col) * lda + row] * x[col];
+    if constexpr (tA)
+      idx = static_cast<uint64_t>(row) * lda + col;
+    else
+      idx = static_cast<uint64_t>(col) * lda + row;
+    tsum += A[idx] * x[col];
   }
 
   T result = _blockReduce(tsum);
@@ -379,12 +431,83 @@ __global__ void matVecMultKernel(const T* A, const T* x, T* y, uint32_t M, uint3
  * @param lda Leading dimension of A (number of rows)
  * @return void
  */
-template <typename T>
+template <typename T, bool tA = false>
 void matVecMult(const T* A, const T* x, T* y, uint32_t M, uint32_t N, uint32_t lda) {
   // Round the block up to a full warp so _blockReduce never shuffles across absent lanes.
   uint32_t blockDim =
       std::min<uint32_t>(MAX_BLOCK_SIZE, ((N + WARP_SIZE - 1) / WARP_SIZE) * WARP_SIZE);
-  matVecMultKernel<T><<<M, blockDim>>>(A, x, y, M, N, lda);
+  matVecMultKernel<T, tA><<<M, blockDim>>>(A, x, y, M, N, lda);
+}
+
+/**
+ * @brief Rank-1 update (GER): A -= x ⊗ y, i.e. A[:, c] -= x * y[c] for every column c. Updates A in
+ * place; no temporary outer product is materialized.
+ *
+ * @param x Column vector of length M
+ * @param y Row vector of length N
+ * @param A Matrix of size M x N, column-major with leading dimension lda
+ * @param M Number of rows
+ * @param N Number of columns
+ * @param lda Leading dimension of A
+ * @return void
+ */
+template <typename T>
+__global__ void gerKernel(const T* x, const T* y, T* A, uint32_t M, uint32_t N, uint32_t lda) {
+  uint32_t row = blockIdx.y * blockDim.y + threadIdx.y;
+  uint32_t col = blockIdx.x * blockDim.x + threadIdx.x;
+  if (row < M && col < N)
+    A[static_cast<uint64_t>(col) * lda + row] -= x[row] * y[col];
+}
+
+/**
+ * @brief Host launcher for the rank-1 update A -= x ⊗ y.
+ *
+ * @param x Column vector of length M
+ * @param y Row vector of length N
+ * @param A Matrix of size M x N, column-major with leading dimension lda
+ * @param M Number of rows
+ * @param N Number of columns
+ * @param lda Leading dimension of A
+ * @return void
+ */
+template <typename T>
+void ger(const T* x, const T* y, T* A, uint32_t M, uint32_t N, uint32_t lda) {
+  dim3 blockDim(16, 16);
+  dim3 gridDim((N + blockDim.x - 1) / blockDim.x, (M + blockDim.y - 1) / blockDim.y);
+  gerKernel<T><<<gridDim, blockDim>>>(x, y, A, M, N, lda);
+}
+
+/**
+ * @brief Scatters a contiguous vector into a strided destination: dst[i * stride] = src[i]. Used to
+ * write an R row (strided in column-major) from a contiguous mat-vec result.
+ *
+ * @param src Contiguous source vector of length n
+ * @param dst Destination base pointer; element i is written at dst[i * stride]
+ * @param n Number of elements
+ * @param stride Stride in elements between consecutive destination writes
+ * @return void
+ */
+template <typename T>
+__global__ void scatterStridedKernel(const T* src, T* dst, uint32_t n, uint32_t stride) {
+  uint32_t i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < n)
+    dst[static_cast<uint64_t>(i) * stride] = src[i];
+}
+
+/**
+ * @brief Host launcher for scatterStrided.
+ *
+ * @param src Contiguous source vector of length n
+ * @param dst Destination base pointer; element i is written at dst[i * stride]
+ * @param n Number of elements
+ * @param stride Stride in elements between consecutive destination writes
+ * @return void
+ */
+template <typename T>
+void scatterStrided(const T* src, T* dst, uint32_t n, uint32_t stride) {
+  uint32_t blockSize = MAX_BLOCK_SIZE;
+  uint32_t numBlocks = (n + blockSize - 1) / blockSize;
+  scatterStridedKernel<T><<<numBlocks, blockSize>>>(src, dst, n, stride);
 }
 
 /**
@@ -410,12 +533,46 @@ __global__ void scalePerElementKernel(const T* a, T* res, uint64_t N, const T* f
  * @param res Output vector to hold the scaled result
  * @param N Number of elements in a and res
  * @param factors Device pointer to the scaling factors (one T per element on device)
- * @return void
+ * @return voidOn exit: R = upper triangle of A; reflectors live in the lower part plus tau. For
+ * explicit Q (org2r/orgqr): start from I and apply panels in reverse with larfb using Q (not Qᵀ).
  */
 template <typename T> void scalePerElement(const T* a, T* res, uint64_t N, const T* factors) {
   uint32_t blockDim = MAX_BLOCK_SIZE;
   uint32_t gridDim = (N + blockDim - 1) / blockDim;
   scalePerElementKernel<T><<<gridDim, blockDim>>>(a, res, N, factors);
+}
+
+/**
+ * @brief Kernel to identify a slice of an identity matrix of size M x M and store the first N
+ * columns in the provided matrix.
+ *
+ * @param matrix Output matrix to hold the identity matrix slice (size M x N)
+ * @param M Number of rows in the identity matrix
+ * @param N Number of columns in the identity matrix slice
+ * @return void
+ */
+template <typename T> __global__ void identifyMatrixSliceKernel(T* matrix, uint32_t M, uint32_t N) {
+  uint32_t row = blockIdx.x * blockDim.x + threadIdx.x;
+  uint32_t col = blockIdx.y * blockDim.y + threadIdx.y;
+
+  if (row < M && col < M) {
+    matrix[row * M + col] = (row == col) ? static_cast<T>(1) : static_cast<T>(0);
+  }
+}
+
+/**
+ * @brief Generates an identity matrix of size M x M and stores the first N columns in the provided
+ * matrix.
+ *
+ * @param matrix Output matrix to hold the identity matrix slice (size M x N)
+ * @param M Number of rows in the identity matrix
+ * @param N Number of columns in the identity matrix slice
+ * @return void
+ */
+template <typename T> void identityMatrixSlice(T* matrix, uint32_t M, uint32_t N) {
+  dim3 blockDim(16, 16);
+  dim3 gridDim((M + blockDim.x - 1) / blockDim.x, (M + blockDim.y - 1) / blockDim.y);
+  identifyMatrixSliceKernel<T><<<gridDim, blockDim>>>(matrix, M, N);
 }
 
 } // namespace gpu

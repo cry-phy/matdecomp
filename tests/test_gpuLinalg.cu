@@ -1,3 +1,4 @@
+#include "common/cpuLinalg.hpp"
 #include "common/cpuUtils.hpp"
 #include "common/gpuLinalg.cuh"
 #include "common/gpuUtils.cuh"
@@ -306,4 +307,30 @@ TEST(GpuLinalgTest, MatMulTransposed) {
   cudaFree(d_B);
   cudaFree(d_BT);
   cudaFree(d_C);
+}
+
+TEST(GpuLinalgTest, matVecMult) {
+  const uint32_t M = 128;
+  const uint32_t N = 64;
+
+  float h_A[M * N], h_x[N], h_y[M], h_y_ref[M];
+  common::cpu::fillRandom(h_A, M * N);
+  common::cpu::fillRandom(h_x, N);
+
+  float *d_A, *d_x, *d_y;
+  CUDACHECK(cudaMalloc(&d_A, M * N * sizeof(float)));
+  CUDACHECK(cudaMalloc(&d_x, N * sizeof(float)));
+  CUDACHECK(cudaMalloc(&d_y, M * sizeof(float)));
+  CUDACHECK(cudaMemcpy(d_A, h_A, M * N * sizeof(float), cudaMemcpyHostToDevice));
+  CUDACHECK(cudaMemcpy(d_x, h_x, N * sizeof(float), cudaMemcpyHostToDevice));
+  CUDACHECK(cudaMemset(d_y, 0, M * sizeof(float)));
+
+  common::gpu::matVecMult(d_A, d_x, d_y, M, N, M);
+  CUDACHECK(cudaGetLastError());
+  CUDACHECK(cudaMemcpy(h_y, d_y, M * sizeof(float), cudaMemcpyDeviceToHost));
+
+  common::cpu::matVecMul(h_A, h_x, h_y_ref, M, N);
+
+  for (uint32_t i = 0; i < M; ++i)
+    EXPECT_NEAR(h_y[i], h_y_ref[i], 1e-3f) << " mismatch at index " << i;
 }

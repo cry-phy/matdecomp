@@ -2,8 +2,8 @@
 #include "common/gpuUtils.cuh"
 #include "qr/gpuBlockedHouseholder.cuh"
 #include <gtest/gtest.h>
+#include <iomanip>
 
-// ── Test 1: singleReflector ──────────────────────────────────────────────────
 TEST(detailBlockedHouseholder, singleReflectorTest) {
   const int M = 5;
   float *d_tau, *d_v;
@@ -24,7 +24,6 @@ TEST(detailBlockedHouseholder, singleReflectorTest) {
   CUDACHECK(cudaFree(d_v));
 }
 
-// ── Test 2: applyReflectorKernel ─────────────────────────────────────────────
 TEST(detailBlockedHouseholder, applyReflectorKernelTest) {
   const int M = 4;
   const int N = 3;
@@ -65,8 +64,6 @@ TEST(detailBlockedHouseholder, unblockedPanelFullTest) {
   const int M = 7;
   const int N = 4;
 
-  // Full-rank deterministic matrix (column-major). Avoids degenerate columns so
-  // every reflector is non-trivial.
   float A_host[M * N];
   for (int i = 0; i < M * N; ++i) {
     A_host[i] = static_cast<float>((i * 37 + 11) % 100) * 0.1f;
@@ -79,23 +76,17 @@ TEST(detailBlockedHouseholder, unblockedPanelFullTest) {
 
   CUDACHECK(cudaMemcpy(d_V, A_host, M * N * sizeof(float), cudaMemcpyHostToDevice));
 
-  // Step 1: factor the panel in place. After this, V holds R in its upper triangle
-  // (diagonal = beta) and the essential reflector vectors below the diagonal.
-  // Dense panel: memory stride == effective height == M.
   qr::gpu::_detail::unblockedPanel(d_V, d_tau, M /*stride*/, N, M /*M_eff*/);
   CUDACHECK(cudaDeviceSynchronize());
 
-  // Step 2: build Q = H_0 · H_1 · ... · H_{N-1} from identity.
-  // applyReflectorKernel left-multiplies (C := H·C), so to land H_0 on the far left
-  // we apply in REVERSE order. Reflector j acts on rows j..M-1, hence the +j offset.
   float I[M * M] = {0};
   for (int i = 0; i < M; ++i)
     I[i * M + i] = 1.0f;
   CUDACHECK(cudaMemcpy(d_Q, I, M * M * sizeof(float), cudaMemcpyHostToDevice));
 
   for (int j = N - 1; j >= 0; --j) {
-    qr::gpu::_detail::applyReflectorKernel<<<M, M>>>(d_Q + j, d_V + j * M + j, d_tau + j,
-                                                     M /*stride*/, M /*numcols*/, M - j /*M_eff*/);
+    qr::gpu::_detail::applyReflectorKernel<<<M, M>>>(d_Q + j, d_V + j * M + j, d_tau + j, M, M,
+                                                     M - j);
     CUDACHECK(cudaDeviceSynchronize());
   }
 
@@ -135,26 +126,21 @@ TEST(detailBlockedHouseholder, buildTMatrixTest) {
                      5.0f, 6.0f, 11.0f, 2.0f}; // col 2: R, R, diag, then v2 below
   float tau[NB] = {0.5f, 0.25f, 0.5f};
 
-  float *d_V, *d_tau, *d_T, *d_ws;
+  float *d_V, *d_tau, *d_T;
   CUDACHECK(cudaMalloc(&d_V, M * NB * sizeof(float)));
   CUDACHECK(cudaMalloc(&d_tau, NB * sizeof(float)));
   CUDACHECK(cudaMalloc(&d_T, NB * NB * sizeof(float)));
-  CUDACHECK(cudaMalloc(&d_ws, NB * sizeof(float)));
   CUDACHECK(cudaMemcpy(d_V, V, M * NB * sizeof(float), cudaMemcpyHostToDevice));
   CUDACHECK(cudaMemcpy(d_tau, tau, NB * sizeof(float), cudaMemcpyHostToDevice));
 
-  qr::gpu::_detail::buildTMatrix(d_V, d_tau, d_T, M, NB, d_ws, M);
+  qr::gpu::_detail::buildTMatrix(d_V, d_tau, d_T, M, NB, /*ldv=*/M);
 
   CUDACHECK(cudaDeviceSynchronize());
 
   float T_host[NB * NB];
   CUDACHECK(cudaMemcpy(T_host, d_T, NB * NB * sizeof(float), cudaMemcpyDeviceToHost));
 
-  // Expected upper triangle (column-major, leading dim NB). The lower triangle is
-  // not checked: the contract only defines the upper-triangular part of T.
-  const float expected[NB * NB] = {0.5f,     0.0f,   0.0f,  // col 0
-                                   0.375f,   0.25f,  0.0f,  // col 1
-                                   -0.0625f, 0.125f, 0.5f}; // col 2
+  const float expected[NB * NB] = {0.5f, 0.0f, 0.0f, 0.375f, 0.25f, 0.0f, -0.0625f, 0.125f, 0.5f};
   for (int j = 0; j < NB; ++j)
     for (int i = 0; i <= j; ++i)
       EXPECT_NEAR(T_host[i + j * NB], expected[i + j * NB], 1e-5f)
@@ -163,5 +149,56 @@ TEST(detailBlockedHouseholder, buildTMatrixTest) {
   CUDACHECK(cudaFree(d_V));
   CUDACHECK(cudaFree(d_tau));
   CUDACHECK(cudaFree(d_T));
-  CUDACHECK(cudaFree(d_ws));
+}
+
+TEST(detailBlockedHouseholder, MatrixOrchestrationTest) {
+  const uint32_t M = 48;
+  const uint32_t N = 48;
+
+  float* d_A;
+  CUDACHECK(cudaMalloc(&d_A, M * N * sizeof(float)));
+
+  float* h_A = new float[M * N];
+  common::cpu::fillRandom(h_A, M * N);
+  CUDACHECK(cudaMemcpy(d_A, h_A, M * N * sizeof(float), cudaMemcpyDeviceToHost));
+
+  qr::gpu::BlockedHouseholderWorkspace<float> d_workspace1;
+  qr::gpu::mallocWorkspace(d_workspace1, M, N, 16);
+
+  qr::gpu::_detail::blockedOrchestrator(d_A, d_workspace1.res, M, N, std::move(d_workspace1));
+
+  qr::gpu::BlockedHouseholderWorkspace<float> d_workspace2;
+  qr::gpu::mallocWorkspace(d_workspace2, M, N, N);
+
+  qr::gpu::_detail::blockedOrchestrator(d_A, d_workspace2.res, M, N, std::move(d_workspace2));
+
+  // DEBUG print result intermediates:
+  float* h_res1 = new float[M * N];
+  float* h_res2 = new float[M * N];
+  CUDACHECK(cudaMemcpy(h_res1, d_workspace1.res, M * N * sizeof(float), cudaMemcpyDeviceToHost));
+  CUDACHECK(cudaMemcpy(h_res2, d_workspace2.res, M * N * sizeof(float), cudaMemcpyDeviceToHost));
+
+  std::cout << "Result from panelWidth=16:\n";
+  for (uint32_t i = 0; i < M; ++i) {
+    for (uint32_t j = 0; j < N; ++j) {
+      std::cout << h_res1[i + j * M] << std::setprecision(2) << " ";
+    }
+    std::cout << "\n";
+  }
+
+  std::cout << "\nResult from panelWidth=N:\n";
+  for (uint32_t i = 0; i < M; ++i) {
+    for (uint32_t j = 0; j < N; ++j) {
+      std::cout << h_res2[i + j * M] << std::setprecision(2) << " ";
+    }
+    std::cout << "\n";
+  }
+
+  // for (uint32_t i = 0; i < M * N; ++i) {
+  //   EXPECT_NEAR(h_res1[i], h_res2[i], 1e-4f)
+  //       << "Mismatch at index " << i << ": res1=" << h_res1[i] << ", res2=" << h_res2[i];
+  // }
+
+  qr::gpu::freeWorkspace(d_workspace1);
+  qr::gpu::freeWorkspace(d_workspace2);
 }

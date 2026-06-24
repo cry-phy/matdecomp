@@ -170,4 +170,14 @@ template <typename T> inline void transpose(const T* A, T* res, size_t AM, size_
   }
 }
 
+template <typename T> inline void matVecMul(const T* A, const T* x, T* res, size_t AM, size_t AN) {
+  for (size_t i = 0; i < AM; i++) {
+    T sum = 0;
+    for (size_t j = 0; j < AN; j++) {
+      sum += A[i + j * AM] * x[j];
+    }
+    res[i] = sum;
+  }
+}
+
 } // namespace common::cpu

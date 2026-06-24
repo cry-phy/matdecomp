@@ -2,7 +2,6 @@
 #include <cstdint>
 #include <cstdio>
 #include <cuda_runtime.h>
-#include <iostream>
 
 namespace common {
 
@@ -40,10 +39,11 @@ template <typename T> __global__ void fillBufferKernel(T* buffer, uint64_t N, T 
 }
 
 template <typename T> void fillBuffer(T* buffer, uint64_t N, T value) {
+  if (N == 0) {
+    return; // No elements to fill
+  }
   const uint32_t threadsPerBlock = std::min(static_cast<uint32_t>(256), static_cast<uint32_t>(N));
   uint32_t blocks = (N + threadsPerBlock - 1) / threadsPerBlock;
-  std::cout << "Filling buffer with " << N << " elements using " << blocks << " blocks of "
-            << threadsPerBlock << " threads each." << std::endl;
   fillBufferKernel<<<blocks, threadsPerBlock>>>(buffer, N, value);
   CUDACHECK(cudaGetLastError());
 }
