@@ -1,11 +1,15 @@
 #include "common/cpuLinalg.hpp"
 #include "common/cpuUtils.hpp"
 #include "common/gpuUtils.cuh"
+#include "qr/gpuBlockedHouseholder.cuh"
 #include "qr/gpuGramSchmidt.cuh"
+#include "qr/gpuModifiedGramSchmidt.cuh"
 #include "qr/gpuhouseholder.cuh"
 #include "qrTestData.hpp"
+#include "gtest/gtest.h"
 #include <cstdlib>
 #include <cuda_runtime.h>
+#include <iomanip>
 #include <limits>
 
 // ── manufactured tests (known Q and R) ───────────────────────────────────────
@@ -50,6 +54,38 @@ TEST_P(QRTestFloat, GpuGramSchmidt) {
   cudaFree(d_workspace);
 }
 
+TEST_P(QRTestFloat, GpuModifiedGramSchmidt) {
+  const auto& tc = GetParam();
+  float *d_A, *d_Q, *d_R, *d_workspace;
+  CUDACHECK(cudaMalloc(&d_A, M * N * sizeof(float)));
+  CUDACHECK(cudaMalloc(&d_Q, M * N * sizeof(float)));
+  CUDACHECK(cudaMalloc(&d_R, N * N * sizeof(float)));
+  CUDACHECK(cudaMalloc(&d_workspace, M * sizeof(float)));
+  CUDACHECK(cudaMemcpy(d_A, tc.A, M * N * sizeof(float), cudaMemcpyHostToDevice));
+
+  qr::gpu::modifiedGramSchmidt(d_A, d_Q, d_R, M, N, d_workspace);
+  CUDACHECK(cudaDeviceSynchronize());
+
+  float tol = static_cast<float>(tc.kappa) * static_cast<float>(N) *
+              std::numeric_limits<float>::epsilon() * 100.0f;
+
+  float* h_Q = common::cpu::allocBuffer<float>(M * N);
+  float* h_R = common::cpu::allocBuffer<float>(N * N);
+  CUDACHECK(cudaMemcpy(h_Q, d_Q, M * N * sizeof(float), cudaMemcpyDeviceToHost));
+  CUDACHECK(cudaMemcpy(h_R, d_R, N * N * sizeof(float), cudaMemcpyDeviceToHost));
+
+  for (size_t i = 0; i < M * N; ++i)
+    EXPECT_NEAR(h_Q[i], tc.expectedQ[i], tol) << "Q mismatch at index " << i;
+  for (size_t i = 0; i < N * N; ++i)
+    EXPECT_NEAR(h_R[i], tc.expectedR[i], tol) << "R mismatch at index " << i;
+
+  common::cpu::freeBuffer(h_Q);
+  common::cpu::freeBuffer(h_R);
+  cudaFree(d_A);
+  cudaFree(d_Q);
+  cudaFree(d_R);
+  cudaFree(d_workspace);
+}
 
 TEST_P(QRTestFloat, GpuHouseholder) {
   const auto& tc = GetParam();
@@ -85,8 +121,6 @@ TEST_P(QRTestFloat, GpuHouseholder) {
   cudaFree(d_R);
   cudaFree(d_workspace);
 }
-
-// ── property-based tests (random A, check QR=A, Q orthonormal, R upper tri) ──
 
 class QRGpuReversalTest : public ::testing::TestWithParam<QRReversalCase> {
 protected:
@@ -126,8 +160,8 @@ protected:
   }
 
   float tol() const {
-    return static_cast<float>(N) * static_cast<float>(N) *
-           std::numeric_limits<float>::epsilon() * 1000.0f;
+    return static_cast<float>(N) * static_cast<float>(N) * std::numeric_limits<float>::epsilon() *
+           1000.0f;
   }
 
   float *h_A, *h_Q, *h_R;
@@ -177,4 +211,65 @@ TEST_P(QRGpuReversalTest, GpuHouseholder) {
   for (size_t i = 0; i < M * N; i++)
     EXPECT_NEAR(QR[i], h_A[i], t) << "QR != A at index " << i;
   delete[] QR;
+}
+
+TEST_P(QRGpuReversalTest, GpuModifiedGramSchmidt) {
+  qr::gpu::modifiedGramSchmidt(d_A, d_Q, d_R, M, N, d_workspace);
+  copyResultsToHost();
+  float t = tol();
+
+  // Verify Q orthogonality
+  EXPECT_NEAR(common::cpu::orthogonalityError(h_Q, M, N), 0.0f, t);
+
+  // Verify R upper triangularity
+  for (size_t j = 0; j < N; j++)
+    for (size_t i = j + 1; i < N; i++)
+      EXPECT_NEAR(h_R[i + j * N], 0.0f, t) << "R not upper triangular at [" << i << "," << j << "]";
+
+  // Verify Q * R == A
+  float* QR = new float[M * N];
+  common::cpu::matMul(h_Q, M, N, h_R, N, N, QR);
+  for (size_t i = 0; i < M * N; i++)
+    EXPECT_NEAR(QR[i], h_A[i], t) << "QR != A at index " << i;
+  delete[] QR;
+}
+
+TEST_P(QRGpuReversalTest, GpuBlockedHouseholder) {
+  qr::gpu::BlockedHouseholderWorkspace<float> d_workspace;
+  qr::gpu::mallocWorkspace(d_workspace, M, N, 32);
+  qr::gpu::blockedHouseHolder(d_A, d_Q, d_R, M, N, d_workspace);
+  copyResultsToHost();
+  float t = tol();
+
+  // Verify Q orthogonality
+  EXPECT_NEAR(common::cpu::orthogonalityError(h_Q, M, N), 0.0f, t);
+
+  // Verify R upper triangularity
+  for (size_t j = 0; j < N; j++)
+    for (size_t i = j + 1; i < N; i++)
+      EXPECT_NEAR(h_R[i + j * N], 0.0f, t) << "R not upper triangular at [" << i << "," << j << "]";
+
+  // Verify Q * R == A
+  float* QR = new float[M * N];
+  common::cpu::matMul(h_Q, M, N, h_R, N, N, QR);
+  for (size_t i = 0; i < M * N; i++)
+    EXPECT_NEAR(QR[i], h_A[i], t) << "QR != A at index " << i;
+  delete[] QR;
+  qr::gpu::freeWorkspace(d_workspace);
+
+  std::cout << "R" << M << "x" << N << ": " << std::endl;
+  for (size_t i = 0; i < N; i++) {
+    for (size_t j = 0; j < N; j++) {
+      std::cout << h_R[i + j * N] << std::setprecision(2) << " ";
+    }
+    std::cout << std::endl;
+  }
+
+  std::cout << "Q" << M << "x" << N << ": " << std::endl;
+  for (size_t i = 0; i < M; i++) {
+    for (size_t j = 0; j < N; j++) {
+      std::cout << h_Q[i + j * M] << std::setprecision(2) << " ";
+    }
+    std::cout << std::endl;
+  }
 }
