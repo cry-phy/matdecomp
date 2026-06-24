@@ -281,7 +281,8 @@ template <typename T> void project(const T* a, const T* b, T* res, uint32_t N, T
  */
 template <typename T, bool tA = false, bool tB = false>
 __global__ void __launch_bounds__(BLOCK_SIZE* BLOCK_SIZE)
-    matMulKernel(const T* A, const T* B, T* C, uint32_t M, uint32_t K, uint32_t N) {
+    matMulKernel(const T* A, const T* B, T* C, uint32_t M, uint32_t K, uint32_t N, uint32_t ldA,
+                 uint32_t ldB, uint32_t ldC) {
   __shared__ T As[BLOCK_SIZE][BLOCK_SIZE];
   __shared__ T Bs[BLOCK_SIZE][BLOCK_SIZE];
 
@@ -293,9 +294,9 @@ __global__ void __launch_bounds__(BLOCK_SIZE* BLOCK_SIZE)
     uint32_t aCol = m * BLOCK_SIZE + threadIdx.x;
     if (row < M && aCol < K) {
       if constexpr (tA)
-        As[threadIdx.y][threadIdx.x] = A[static_cast<uint64_t>(row) * K + aCol];
+        As[threadIdx.y][threadIdx.x] = A[static_cast<uint64_t>(row) * ldA + aCol];
       else
-        As[threadIdx.y][threadIdx.x] = A[static_cast<uint64_t>(aCol) * M + row];
+        As[threadIdx.y][threadIdx.x] = A[static_cast<uint64_t>(aCol) * ldA + row];
     } else {
       As[threadIdx.y][threadIdx.x] = static_cast<T>(0);
     }
@@ -303,9 +304,9 @@ __global__ void __launch_bounds__(BLOCK_SIZE* BLOCK_SIZE)
     uint32_t bRow = m * BLOCK_SIZE + threadIdx.y;
     if (bRow < K && col < N) {
       if constexpr (tB)
-        Bs[threadIdx.y][threadIdx.x] = B[static_cast<uint64_t>(bRow) * N + col];
+        Bs[threadIdx.y][threadIdx.x] = B[static_cast<uint64_t>(bRow) * ldB + col];
       else
-        Bs[threadIdx.y][threadIdx.x] = B[static_cast<uint64_t>(col) * K + bRow];
+        Bs[threadIdx.y][threadIdx.x] = B[static_cast<uint64_t>(col) * ldB + bRow];
     } else {
       Bs[threadIdx.y][threadIdx.x] = static_cast<T>(0);
     }
@@ -317,7 +318,7 @@ __global__ void __launch_bounds__(BLOCK_SIZE* BLOCK_SIZE)
   }
 
   if (row < M && col < N)
-    C[static_cast<uint64_t>(col) * M + row] = Cvalue; // C stored M x N (ld = M)
+    C[static_cast<uint64_t>(col) * ldC + row] = Cvalue; // C stored M x N (ld = M)
 }
 
 /**
@@ -332,10 +333,11 @@ __global__ void __launch_bounds__(BLOCK_SIZE* BLOCK_SIZE)
  * @return void
  */
 template <typename T, bool tA = false, bool tB = false>
-void matMul(const T* A, const T* B, T* C, uint32_t M, uint32_t K, uint32_t N) {
+void matMul(const T* A, const T* B, T* C, uint32_t M, uint32_t K, uint32_t N, uint32_t ldA,
+            uint32_t ldB, uint32_t ldC) {
   dim3 blockDim(BLOCK_SIZE, BLOCK_SIZE);
   dim3 gridDim((N + BLOCK_SIZE - 1) / BLOCK_SIZE, (M + BLOCK_SIZE - 1) / BLOCK_SIZE);
-  matMulKernel<T, tA, tB><<<gridDim, blockDim>>>(A, B, C, M, K, N);
+  matMulKernel<T, tA, tB><<<gridDim, blockDim>>>(A, B, C, M, K, N, ldA, ldB, ldC);
 }
 
 /**

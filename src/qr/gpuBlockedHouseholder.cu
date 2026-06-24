@@ -122,14 +122,15 @@ void buildTMatrix(T* V, T* tau, T* Tmat, uint32_t stride, uint32_t panelWidth, T
 
 template <typename T>
 void blockTrailingUpdate(T* C, const T* V, const T* Tmat, uint32_t M, uint32_t N,
-                         uint32_t panelWidth, T* W_workspace, T* C_workspace) {
-  T* W = W_workspace;
+                         uint32_t panelWidth, T* W_workspace1, T* W_workspace2, T* C_workspace) {
+  T* W1 = W_workspace1;
+  T* W2 = W_workspace2;
   // Step 1: W = V^T C
-  common::gpu::matMul<T, true, false>(V, C, W, panelWidth, M, N);
+  common::gpu::matMul<T, true, false>(V, C, W1, panelWidth, M, N, M, M, M);
   // Step 2: W = T^T W
-  common::gpu::matMul<T, true, false>(Tmat, W, W, panelWidth, panelWidth, N);
+  common::gpu::matMul<T, true, false>(Tmat, W1, W2, panelWidth, panelWidth, N, panelWidth, M, M);
   // Step 3: C_workspace = V W
-  common::gpu::matMul<T, false, false>(V, W, C_workspace, M, panelWidth, N);
+  common::gpu::matMul<T, false, false>(V, W2, C_workspace, M, panelWidth, N, M, M, M);
   // Step 4: C -= C_workspace
   common::gpu::subtract<T>(C, C_workspace, C, static_cast<uint64_t>(M) * N);
 }
@@ -145,9 +146,9 @@ template __global__ void applyReflectorKernel<double>(double*, const double*, co
 template void buildTMatrix<float>(float*, float*, float*, uint32_t, uint32_t, float*);
 template void buildTMatrix<double>(double*, double*, double*, uint32_t, uint32_t, double*);
 template void blockTrailingUpdate<float>(float*, const float*, const float*, uint32_t, uint32_t,
-                                         uint32_t, float*, float*);
+                                         uint32_t, float*, float*, float*);
 template void blockTrailingUpdate<double>(double*, const double*, const double*, uint32_t, uint32_t,
-                                          uint32_t, double*, double*);
+                                          uint32_t, double*, double*, double*);
 
 } // namespace qr::gpu::_detail
 

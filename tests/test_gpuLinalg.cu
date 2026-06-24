@@ -130,7 +130,7 @@ TEST(GpuLinalgTest, MatMul) {
   CUDACHECK(cudaMemcpy(d_A, h_A, M * K * sizeof(float), cudaMemcpyHostToDevice));
   CUDACHECK(cudaMemcpy(d_B, h_B, K * N * sizeof(float), cudaMemcpyHostToDevice));
 
-  common::gpu::matMul(d_A, d_B, d_C, M, K, N);
+  common::gpu::matMul(d_A, d_B, d_C, M, K, N, M, K, M);
   CUDACHECK(cudaGetLastError());
 
   float h_C[M * N];
@@ -177,7 +177,7 @@ TEST(GpuLinalgTest, MatMulTransposedMan) {
   CUDACHECK(cudaMemcpy(d_A, h_A, M * K * sizeof(float), cudaMemcpyHostToDevice));
   CUDACHECK(cudaMemcpy(d_B, h_B, K * N * sizeof(float), cudaMemcpyHostToDevice));
 
-  common::gpu::matMul(d_A, d_B, d_C, M, K, N);
+  common::gpu::matMul(d_A, d_B, d_C, M, K, N, M, K, M);
   CUDACHECK(cudaMemcpy(h_C, d_C, M * N * sizeof(float), cudaMemcpyDeviceToHost));
 
   h_C_refnn[0] = 1.0f;
@@ -197,7 +197,7 @@ TEST(GpuLinalgTest, MatMulTransposedMan) {
     }
   }
 
-  common::gpu::matMul<float, true, true>(d_A, d_B, d_C, M, K, N);
+  common::gpu::matMul<float, true, true>(d_A, d_B, d_C, M, K, N, M, K, M);
   CUDACHECK(cudaMemcpy(h_C, d_C, M * N * sizeof(float), cudaMemcpyDeviceToHost));
 
   for (uint32_t i = 0; i < K - 1; i++)
@@ -217,7 +217,7 @@ TEST(GpuLinalgTest, MatMulTransposedMan) {
     }
   }
 
-  common::gpu::matMul<float, true, false>(d_A, d_B, d_C, M, K, N);
+  common::gpu::matMul<float, true, false>(d_A, d_B, d_C, M, K, N, M, K, M);
   CUDACHECK(cudaMemcpy(h_C, d_C, M * N * sizeof(float), cudaMemcpyDeviceToHost));
 
   for (uint32_t i = 0; i < K; i++)
@@ -235,7 +235,7 @@ TEST(GpuLinalgTest, MatMulTransposedMan) {
     }
   }
 
-  common::gpu::matMul<float, false, true>(d_A, d_B, d_C, M, K, N);
+  common::gpu::matMul<float, false, true>(d_A, d_B, d_C, M, K, N, M, K, M);
   CUDACHECK(cudaMemcpy(h_C, d_C, M * N * sizeof(float), cudaMemcpyDeviceToHost));
 
   for (uint32_t i = 0; i < K; i++)
@@ -292,13 +292,13 @@ TEST(GpuLinalgTest, MatMulTransposed) {
       EXPECT_NEAR(h_C[i], ref[i], 1e-3f) << combo << " mismatch at " << i;
   };
 
-  common::gpu::matMul<float, false, false>(d_A, d_B, d_C, M, K, N);
+  common::gpu::matMul<float, false, false>(d_A, d_B, d_C, M, K, N, M, K, M);
   expectRef("nn");
-  common::gpu::matMul<float, true, false>(d_AT, d_B, d_C, M, K, N);
+  common::gpu::matMul<float, true, false>(d_AT, d_B, d_C, M, K, N, K, K, M);
   expectRef("tn");
-  common::gpu::matMul<float, false, true>(d_A, d_BT, d_C, M, K, N);
+  common::gpu::matMul<float, false, true>(d_A, d_BT, d_C, M, K, N, M, N, M);
   expectRef("nt");
-  common::gpu::matMul<float, true, true>(d_AT, d_BT, d_C, M, K, N);
+  common::gpu::matMul<float, true, true>(d_AT, d_BT, d_C, M, K, N, K, N, M);
   expectRef("tt");
 
   cudaFree(d_A);
