@@ -9,6 +9,9 @@ Three figure types are produced:
 
 * ``contour_<algo>_<dtype>.png`` -- filled contour of log-runtime over the
   matrix dimensions (M, N), one per algorithm.
+* ``contour_<algo>_vs_<ref>_<dtype>.png`` -- filled contour of the runtime
+  ratio ``log10(algo / reference)`` over (M, N), one per algorithm, when a
+  reference series (cuSOLVER/cuSPARSE) is present. Red = slower than reference.
 * ``square_comparison.png`` -- runtime vs size for square matrices (M == N),
   one line per algorithm.
 * ``skinny_comparison_<pct>.png`` -- runtime vs M for fixed aspect ratios
@@ -27,21 +30,50 @@ from collections import defaultdict
 import matplotlib
 
 matplotlib.use("Agg")  # headless: write files, never open a window
-import matplotlib.pyplot as plt  # noqa: E402
-import numpy as np  # noqa: E402
+import matplotlib.colors as mcolors
+import matplotlib.pyplot as plt
+import numpy as np
 
 # Skinny aspect ratios (N / M) to compare, with display labels.
 SKINNY_RATIOS = ((0.0625, "6.25pct"), (0.125, "12.5pct"), (0.25, "25pct"))
 
-# benchmarkGpuModifiedGramSchmidt<float>/512/2 -> algo, dtype, M, N
+# Matches both our templated benchmarks and the reference, which has no dtype
+# and a trailing ``/manual_time`` suffix (from UseManualTime):
+#   benchmarkGpuModifiedGramSchmidt<float>/512/2 -> algo, dtype, M, N
+#   benchmarkCusolver/512/2/manual_time           -> algo, (dtype defaults to float)
 NAME_RE = re.compile(
-    r"^(?P<algo>\w+)<(?P<dtype>\w+)>/(?P<M>\d+)/(?P<N>\d+)$"
+    r"^(?P<algo>\w+)(?:<(?P<dtype>\w+)>)?/(?P<M>\d+)/(?P<N>\d+)(?:/\w+)*$"
 )
+
+# Reference/baseline series (e.g. cuSOLVER) are drawn as a distinct dashed line.
+REFERENCE_RE = re.compile(r"cusolver|cusparse|reference", re.IGNORECASE)
 
 
 def _clean_algo(name):
     """Strip the ``benchmark[Gpu|Cpu]`` prefix for a readable legend label."""
     return re.sub(r"^benchmark(Gpu|Cpu)?", "", name)
+
+
+def _is_reference(algo):
+    """True if ``algo`` is an external reference implementation, not ours."""
+    return bool(REFERENCE_RE.search(algo))
+
+
+def _draw_series(ax, sizes, times, algo):
+    """Plot one algorithm's line; references stand out as a dashed black baseline."""
+    if _is_reference(algo):
+        ax.plot(
+            sizes,
+            times,
+            color="black",
+            linestyle="--",
+            linewidth=2,
+            marker="x",
+            zorder=10,
+            label=f"{algo} (ref)",
+        )
+    else:
+        ax.plot(sizes, times, marker="o", label=algo)
 
 
 def load(paths):
@@ -64,7 +96,7 @@ def load(paths):
             records.append(
                 {
                     "algo": _clean_algo(match["algo"]),
-                    "dtype": match["dtype"],
+                    "dtype": match["dtype"] or "float",
                     "M": int(match["M"]),
                     "N": int(match["N"]),
                     "time_ms": entry["real_time"] / 1e6,
@@ -96,8 +128,7 @@ def plot_contour(records, outdir):
 
         fig, ax = plt.subplots(figsize=(7, 6))
         contour = ax.tricontourf(x, y, z, levels=14, cmap="viridis")
-        ax.tricontour(x, y, z, levels=14, colors="k", linewidths=0.3,
-                      alpha=0.4)
+        ax.tricontour(x, y, z, levels=14, colors="k", linewidths=0.3, alpha=0.4)
         ax.plot(x, y, "k.", markersize=3, alpha=0.5)
 
         bar = fig.colorbar(contour, ax=ax)
@@ -115,12 +146,89 @@ def plot_contour(records, outdir):
         print("wrote", path)
 
 
+def _by_key_times(records):
+    """Group runtimes as ``{(algo, dtype): {(M, N): time_ms}}``."""
+    grouped = defaultdict(dict)
+    for rec in records:
+        grouped[(rec["algo"], rec["dtype"])][(rec["M"], rec["N"])] = rec["time_ms"]
+    return grouped
+
+
+def plot_contour_vs_reference(records, outdir):
+    """Filled contour of the runtime ratio (algo / reference) over (N, M).
+
+    One figure per (our-algorithm, reference) pair, sharing the matrix sizes the
+    two have in common. Colour is ``log10(time_algo / time_ref)`` on a diverging
+    scale centred at 0: red where we are slower than the reference, blue where
+    faster, white at parity. Skipped entirely when no reference series is loaded.
+    """
+    grouped = _by_key_times(records)
+    refs = sorted(key for key in grouped if _is_reference(key[0]))
+    if not refs:
+        print("no reference series found; skipping reference-ratio contours")
+        return
+
+    for ref_algo, ref_dtype in refs:
+        ref_times = grouped[(ref_algo, ref_dtype)]
+        for (algo, dtype), times in sorted(grouped.items()):
+            if _is_reference(algo) or dtype != ref_dtype:
+                continue
+            shared = [mn for mn in times if mn in ref_times]
+            if len(shared) < 3:
+                continue  # tricontourf needs at least a triangle
+            x = np.log2([n for (_, n) in shared])
+            y = np.log2([m for (m, _) in shared])
+            z = np.log10([times[mn] / ref_times[mn] for mn in shared])
+
+            # Span the actual data range so the colorbar carries real signal.
+            zmin, zmax = float(np.min(z)), float(np.max(z))
+            if zmax - zmin < 1e-9:  # nearly flat: pad so the levels are valid
+                pad = max(abs(zmax) * 0.1, 1e-3)
+                zmin, zmax = zmin - pad, zmax + pad
+            levels = np.linspace(zmin, zmax, 15)
+
+            if zmin < 0.0 < zmax:
+                # Straddles parity: diverging, anchored at 0 (white == on par).
+                cmap = "RdBu_r"
+                norm = mcolors.TwoSlopeNorm(vcenter=0.0, vmin=zmin, vmax=zmax)
+            else:
+                # Entirely one side: sequential over the data range, no wasted
+                # half. All slower -> Reds (darker == slower); all faster -> Blues.
+                cmap = "Reds" if zmin >= 0.0 else "Blues_r"
+                norm = None
+
+            fig, ax = plt.subplots(figsize=(7, 6))
+            contour = ax.tricontourf(x, y, z, levels=levels, cmap=cmap, norm=norm)
+            ax.tricontour(x, y, z, levels=levels, colors="k", linewidths=0.3,
+                          alpha=0.4)
+            ax.plot(x, y, "k.", markersize=3, alpha=0.5)
+
+            bar = fig.colorbar(contour, ax=ax)
+            bar.set_label(f"log10( {algo} / {ref_algo} )")
+
+            _log2_ticks(ax.set_xticks, ax.set_xticklabels, x)
+            _log2_ticks(ax.set_yticks, ax.set_yticklabels, y)
+            ax.set_xlabel("N (columns)")
+            ax.set_ylabel("M (rows)")
+            ax.set_title(
+                f"{algo} vs {ref_algo} <{dtype}> -- runtime ratio "
+                "(red = slower than reference)"
+            )
+
+            path = os.path.join(
+                outdir, f"contour_{algo}_vs_{ref_algo}_{dtype}.png"
+            )
+            fig.savefig(path, dpi=150, bbox_inches="tight")
+            plt.close(fig)
+            print("wrote", path)
+
+
 def _log2_ticks(set_ticks, set_labels, values):
     """Place ticks at each integer power of two spanned by ``values``."""
     lo, hi = int(np.floor(values.min())), int(np.ceil(values.max()))
     ticks = list(range(lo, hi + 1))
     set_ticks(ticks)
-    set_labels([str(2 ** t) for t in ticks])
+    set_labels([str(2**t) for t in ticks])
 
 
 def _series(recs):
@@ -144,7 +252,7 @@ def plot_square(records, outdir):
         if algo not in by_algo:
             continue
         sizes, times = _series(by_algo[algo])
-        ax.plot(sizes, times, marker="o", label=algo)
+        _draw_series(ax, sizes, times, algo)
 
     ax.set_xscale("log", base=2)
     ax.set_yscale("log")
@@ -176,15 +284,13 @@ def plot_skinny(records, outdir):
             if algo not in by_algo:
                 continue
             sizes, times = _series(by_algo[algo])
-            ax.plot(sizes, times, marker="o", label=algo)
+            _draw_series(ax, sizes, times, algo)
 
         ax.set_xscale("log", base=2)
         ax.set_yscale("log")
         ax.set_xlabel("M (rows)")
         ax.set_ylabel("runtime [ms]")
-        ax.set_title(
-            f"Skinny QR (N/M = {ratio * 100:g}%): runtime by algorithm"
-        )
+        ax.set_title(f"Skinny QR (N/M = {ratio * 100:g}%): runtime by algorithm")
         ax.grid(True, which="both", linewidth=0.3, alpha=0.5)
         ax.legend()
 
@@ -212,6 +318,7 @@ def main():
     os.makedirs(args.outdir, exist_ok=True)
     records = load(args.json)
     plot_contour(records, args.outdir)
+    plot_contour_vs_reference(records, args.outdir)
     plot_square(records, args.outdir)
     plot_skinny(records, args.outdir)
 
