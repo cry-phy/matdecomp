@@ -1,6 +1,7 @@
 #include "common/gpuUtils.cuh"
 #include "qr/gpuGramSchmidt.cuh"
 #include "qr/gpuModifiedGramSchmidt.cuh"
+#include "qr/gpuTSQR.cuh"
 #include <benchmark/benchmark.h>
 
 template <typename T> static void benchmarkGpuModifiedGramSchmidt(benchmark::State& state) {
@@ -86,6 +87,51 @@ BENCHMARK_TEMPLATE(benchmarkGpuGramSchmidt, float)->Apply([](benchmark::Benchmar
  * @brief Benchmark square matrix performance
  */
 BENCHMARK_TEMPLATE(benchmarkGpuGramSchmidt, float)->Apply([](benchmark::Benchmark* b) {
+  for (long M = 128; M <= 4096; M *= 2) {
+    b->Args({M, M});
+  }
+});
+
+template <typename T>
+static void benchmarkGpuTSQR(benchmark::State& state) {
+  int M = state.range(0);
+  int N = state.range(1);
+
+  // Allocate memory only for A and R (TSQR focuses on R computation)
+  T* d_A;
+  T* d_R;
+  cudaMalloc(&d_A, M * N * sizeof(T));
+  cudaMalloc(&d_R, N * N * sizeof(T));
+
+  // Initialize A with random values
+  common::gpu::randomFill<<<(M * N + 255) / 256, 256>>>(d_A, M * N);
+  cudaDeviceSynchronize();
+
+  // Benchmark loop
+  for (auto _ : state) {
+    qr::gpu::TSQR(d_A, d_R, M, N);
+    cudaDeviceSynchronize();
+  }
+
+  cudaFree(d_A);
+  cudaFree(d_R);
+}
+
+/**
+ * @brief Benchmark tall skinny to square matrix performance for TSQR
+ */
+BENCHMARK_TEMPLATE(benchmarkGpuTSQR, float)->Apply([](benchmark::Benchmark* b) {
+  for (long M = 512; M <= 4096; M *= 2) {
+    for (long N = 2; N <= M / 2; N *= 2) {
+      b->Args({M, N});
+    }
+  }
+});
+
+/**
+ * @brief Benchmark square matrix performance for TSQR
+ */
+BENCHMARK_TEMPLATE(benchmarkGpuTSQR, float)->Apply([](benchmark::Benchmark* b) {
   for (long M = 128; M <= 4096; M *= 2) {
     b->Args({M, M});
   }

@@ -1,5 +1,24 @@
 # Matrix Decomposition
 
+## Compiling 
+
+To compile on the cluster:
+```bash
+mkdir -p build && cd build
+cmake -DCMAKE_CUDA_ARCHITECTURES=70 -DCMAKE_BUILD_TYPE=Release ..
+make -j8
+```
+The test then run with the following job script:
+```bash
+#!/bin/bash
+#SBATCH -p nvltv
+#SBATCH -o job-%j.out
+#SBATCH -N 1
+#SBATCH -t 00:45:00
+module load cuda
+./build/tests/matdecomp_gpu_tests
+```
+
 ## Plotting benchmarks
 
 The GPU benchmarks emit Google Benchmark JSON. To turn a JSON run into figures:
