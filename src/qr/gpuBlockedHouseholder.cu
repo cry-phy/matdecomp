@@ -4,7 +4,6 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
-#include <iomanip>
 #define PANEL_WIDTH 32
 
 namespace qr::gpu::_detail {
@@ -22,7 +21,6 @@ template <typename T> void singleReflector(T* v_j, T* tau_j, uint32_t M_eff) {
   // own R value.
   if (norm <= 1e-8) {
     const T zero = static_cast<T>(0);
-    std::cout << "Column is already zero below diagonal, setting tau to 0." << std::endl;
     CUDACHECK(cudaMemcpy(tau_j, &zero, sizeof(T), cudaMemcpyHostToDevice));
     CUDACHECK(cudaFree(d_tmp));
     return;
@@ -47,23 +45,35 @@ __global__ void applyReflectorKernel(T* C, const T* v_j, const T* tau_j, uint32_
   // Each block processes one column: C[:,col] -= tau * (v^T C[:,col]) * v
   // The reflector's first element is implicitly 1 (LAPACK packed convention);
   // v_j[0] holds the R diagonal, not a reflector entry.
-  uint32_t tid = threadIdx.x;
+  // Rows are strided across the block, so M_eff may exceed the 1024-thread cap.
   uint32_t col = blockIdx.x;
 
   if (col >= N)
     return;
 
-  T vv = static_cast<T>(0);
   T contrib = static_cast<T>(0);
-  if (tid < M_eff) {
-    vv = (tid == 0) ? static_cast<T>(1) : v_j[tid];
-    contrib = C[static_cast<uint64_t>(col) * stride + tid] * vv;
+  for (uint32_t r = threadIdx.x; r < M_eff; r += blockDim.x) {
+    T vv = (r == 0) ? static_cast<T>(1) : v_j[r];
+    contrib += C[static_cast<uint64_t>(col) * stride + r] * vv;
   }
 
   T w_c = common::gpu::_blockReduce(contrib);
 
-  if (tid < M_eff)
-    C[static_cast<uint64_t>(col) * stride + tid] -= (*tau_j) * w_c * vv;
+  const T scale = (*tau_j) * w_c;
+  for (uint32_t r = threadIdx.x; r < M_eff; r += blockDim.x) {
+    T vv = (r == 0) ? static_cast<T>(1) : v_j[r];
+    C[static_cast<uint64_t>(col) * stride + r] -= scale * vv;
+  }
+}
+
+/**
+ * @brief Threads per block for applyReflectorKernel: enough to cover M_eff rows, warp-aligned so
+ * _blockReduce never shuffles across absent lanes, and capped at the hardware limit. Rows beyond
+ * the cap are handled by the kernel's strided loop.
+ */
+inline uint32_t reflectorBlockSize(uint32_t M_eff) {
+  uint32_t warpAligned = ((M_eff + WARP_SIZE - 1) / WARP_SIZE) * WARP_SIZE;
+  return std::min<uint32_t>(MAX_BLOCK_SIZE, warpAligned);
 }
 
 template <typename T>
@@ -73,7 +83,7 @@ void unblockedPanel(T* V, T* tau, uint32_t stride, uint32_t N, uint32_t M_eff) {
     singleReflector(V + static_cast<uint64_t>(stride) * j + j, tau + j, M_eff - j);
     cudaMemcpy(local_tau, tau, N * sizeof(T), cudaMemcpyDeviceToHost);
     if (j < N - 1) {
-      applyReflectorKernel<<<N - j - 1, M_eff - j>>>(
+      applyReflectorKernel<<<N - j - 1, reflectorBlockSize(M_eff - j)>>>(
           V + static_cast<uint64_t>(stride) * (j + 1) + j,
           &V[static_cast<uint64_t>(stride) * j + j], tau + j, stride, N - j - 1, M_eff - j);
       cudaDeviceSynchronize();
@@ -112,7 +122,6 @@ void buildTMatrix(T* V, T* tau, T* Tmat, uint32_t M, uint32_t N, uint32_t ldv) {
       }
       CUDACHECK(cudaMemcpy(v_diag, tmp_beta, sizeof(T), cudaMemcpyDeviceToDevice));
 
-      // w := -tau_j * w (single scalar), then T(0:j, j) := T(0:j, 0:j) * w.
       common::gpu::scale(t_col, t_col, j, -local_tau[j]);
       common::gpu::matVecMult(Tmat, t_col, workspace, j, j, N);
       CUDACHECK(cudaMemcpy(t_col, workspace, static_cast<uint64_t>(j) * sizeof(T),
@@ -134,41 +143,56 @@ void blockTrailingUpdate(T* C, const T* V, const T* Tmat, uint32_t M, uint32_t N
   T* W1 = W_workspace1;
   T* W2 = W_workspace2;
   // Step 1: W = V^T C
-  common::gpu::matMul<T, true, false>(V, C, W1, panelWidth, M, N, ldp, ldp, M);
+  common::gpu::matMul<T, true, false>(V, C, W1, panelWidth, M, N, ldp, ldp, ldp);
   // Step 2: W = T^T W
   common::gpu::matMul<T, true, false>(Tmat, W1, W2, panelWidth, panelWidth, N, panelWidth, ldp,
                                       ldp);
   // Step 3: C_workspace = V W
   common::gpu::matMul<T, false, false>(V, W2, C_workspace, M, panelWidth, N, ldp, ldp, ldp);
-  // Step 4: C -= C_workspace
-  common::gpu::subtractMatrix<T>(C, C_workspace, C, static_cast<uint64_t>(M) * N, ldp, ldp, ldp,
-                                 ldp);
+  // Step 4: C -= C_workspace  (element-wise over the M x N trailing block, ld = ldp)
+  common::gpu::subtractMatrix<T>(C, C_workspace, C, M, N, ldp, ldp, ldp);
 }
 
 template <typename T>
-void blockedOrchestrator(const T* A, T* res, uint32_t M, uint32_t N,
+void blockedOrchestrator(const T* A, T* reflectors, T* R, uint32_t M, uint32_t N,
                          BlockedHouseholderWorkspace<T>&& workspace) {
 
+  common::gpu::zeroBuffer(R, static_cast<uint64_t>(N) * N);
   T* C_trail = workspace.C_trail;
   T* W1 = workspace.W1;
   T* W2 = workspace.W2;
   T* tau = workspace.tau;
   T* Tmat = workspace.Tmat;
   // Copy the current panel from A to workspace.res for in-place updates.
-  CUDACHECK(cudaMemcpy(res, A, sizeof(T) * M * N, cudaMemcpyDeviceToDevice));
+  CUDACHECK(cudaMemcpy(reflectors, A, sizeof(T) * M * N, cudaMemcpyDeviceToDevice));
   for (uint32_t k = 0; k < N; k += workspace.panelWidth) {
     uint32_t panelWidth = std::min(workspace.panelWidth, N - k);
-    std::cout << "Processing panel starting at column " << k << " with width " << panelWidth
-              << std::endl;
 
-    T* V = res + static_cast<uint64_t>(k) * M + k;
+    T* V = reflectors + static_cast<uint64_t>(k) * M + k;
 
     unblockedPanel(V, tau + k, M, panelWidth, M - k);
 
     buildTMatrix(V, tau + k, Tmat, M - k, panelWidth, M);
+    cudaDeviceSynchronize();
+
+    // We will build R along the way, so it must not be stashed before the GEMM calls in trailing
+    // update. Also prepare V to be only the reflectors below the diagonal, with diagonal set to 1!
+    for (uint32_t j = k; j < k + panelWidth; ++j) {
+      CUDACHECK(cudaMemcpy(R + static_cast<uint64_t>(j) * N,
+                           reflectors + static_cast<uint64_t>(j) * M, sizeof(T) * (j + 1),
+                           cudaMemcpyDeviceToDevice));
+    }
+
+    for (uint32_t c = 1; c < panelWidth; ++c) {
+      common::gpu::zeroBuffer(V + static_cast<uint64_t>(c) * M, c);
+    }
+    for (uint32_t c = 0; c < panelWidth; ++c) {
+      common::gpu::fillBuffer(V + static_cast<uint64_t>(c) * M + c, 1, static_cast<T>(1));
+    }
+    cudaDeviceSynchronize();
 
     if (k + panelWidth < N) {
-      T* remaining = res + static_cast<uint64_t>(k + panelWidth) * M + k;
+      T* remaining = reflectors + static_cast<uint64_t>(k + panelWidth) * M + k;
       blockTrailingUpdate(remaining, V, Tmat, M - k, N - k - panelWidth, panelWidth, W1, W2,
                           C_trail, M);
     }
@@ -189,10 +213,11 @@ template <typename T> void constructQ(const T* finalMatrix, T* tau, T* Q, uint32
   // Initialize Q as the identity matrix
   common::gpu::identityMatrixSlice(Q, M, N);
 
-  // Apply the reflectors in reverse order to construct Q
+  // Apply the reflectors in reverse order to construct Q. One block per column of
+  // Q — Q is M x N, so the grid and the column count are N, not M.
   for (int j = N - 1; j >= 0; --j) {
-    qr::gpu::_detail::applyReflectorKernel<<<M, M>>>(Q + j, finalMatrix + j * M + j, tau + j, M, M,
-                                                     M - j);
+    qr::gpu::_detail::applyReflectorKernel<<<N, reflectorBlockSize(M - j)>>>(
+        Q + j, finalMatrix + j * M + j, tau + j, M, N, M - j);
   }
 }
 
@@ -210,9 +235,9 @@ template void blockTrailingUpdate<float>(float*, const float*, const float*, uin
                                          uint32_t, float*, float*, float*, uint32_t);
 template void blockTrailingUpdate<double>(double*, const double*, const double*, uint32_t, uint32_t,
                                           uint32_t, double*, double*, double*, uint32_t);
-template void blockedOrchestrator<float>(const float*, float*, uint32_t, uint32_t,
+template void blockedOrchestrator<float>(const float*, float*, float*, uint32_t, uint32_t,
                                          BlockedHouseholderWorkspace<float>&&);
-template void blockedOrchestrator<double>(const double*, double*, uint32_t, uint32_t,
+template void blockedOrchestrator<double>(const double*, double*, double*, uint32_t, uint32_t,
                                           BlockedHouseholderWorkspace<double>&&);
 template void constructR<float>(const float*, float*, uint32_t, uint32_t);
 template void constructR<double>(const double*, double*, uint32_t, uint32_t);
@@ -248,9 +273,8 @@ template <typename T> void freeWorkspace(BlockedHouseholderWorkspace<T>& workspa
 template <typename T>
 void blockedHouseHolder(const T* A, T* Q, T* R, uint32_t M, uint32_t N,
                         BlockedHouseholderWorkspace<T>& workspace) {
-  _detail::blockedOrchestrator(A, workspace.res, M, N, std::move(workspace));
+  _detail::blockedOrchestrator(A, workspace.res, R, M, N, std::move(workspace));
   _detail::constructQ(workspace.res, workspace.tau, Q, M, N);
-  _detail::constructR(workspace.res, R, M, N);
 }
 
 template void blockedHouseHolder<float>(const float*, float*, float*, uint32_t, uint32_t,

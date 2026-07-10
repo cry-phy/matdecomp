@@ -9,7 +9,6 @@
 #include "gtest/gtest.h"
 #include <cstdlib>
 #include <cuda_runtime.h>
-#include <iomanip>
 #include <limits>
 
 // ── manufactured tests (known Q and R) ───────────────────────────────────────
@@ -242,7 +241,7 @@ TEST_P(QRGpuReversalTest, GpuBlockedHouseholder) {
   float t = tol();
 
   // Verify Q orthogonality
-  EXPECT_NEAR(common::cpu::orthogonalityError(h_Q, M, N), 0.0f, t);
+  EXPECT_NEAR(common::cpu::orthogonalityError(h_Q, M, N), 0.0f, t) << "Q is not orthogonal";
 
   // Verify R upper triangularity
   for (size_t j = 0; j < N; j++)
@@ -256,20 +255,4 @@ TEST_P(QRGpuReversalTest, GpuBlockedHouseholder) {
     EXPECT_NEAR(QR[i], h_A[i], t) << "QR != A at index " << i;
   delete[] QR;
   qr::gpu::freeWorkspace(d_workspace);
-
-  std::cout << "R" << M << "x" << N << ": " << std::endl;
-  for (size_t i = 0; i < N; i++) {
-    for (size_t j = 0; j < N; j++) {
-      std::cout << h_R[i + j * N] << std::setprecision(2) << " ";
-    }
-    std::cout << std::endl;
-  }
-
-  std::cout << "Q" << M << "x" << N << ": " << std::endl;
-  for (size_t i = 0; i < M; i++) {
-    for (size_t j = 0; j < N; j++) {
-      std::cout << h_Q[i + j * M] << std::setprecision(2) << " ";
-    }
-    std::cout << std::endl;
-  }
 }

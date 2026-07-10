@@ -4,6 +4,7 @@
 #include "common/gpuUtils.cuh"
 #include <cuda_runtime.h>
 #include <gtest/gtest.h>
+#include <vector>
 
 // Thin wrapper to expose _blockReduce (a __device__ fn) to a test kernel.
 __global__ void testBlockReduce(float* data, float* result, uint32_t N) {
@@ -108,13 +109,12 @@ TEST(GpuLinalgTest, Project) {
 }
 
 TEST(GpuLinalgTest, MatMul) {
-  const uint32_t M = 64;
-  const uint32_t K = 64;
-  const uint32_t N = 16;
-  float h_A[M * K], h_B[K * N];
-
-  for (uint32_t i = 0; i < M * K; i++)
-    h_A[i] = 0.0f;
+  const uint32_t M = 2024;
+  const uint32_t K = 2024;
+  const uint32_t N = 128;
+  // Heap, not stack: h_A alone is ~16 MB and would overflow the 8 MB stack.
+  std::vector<float> h_A(static_cast<size_t>(M) * K, 0.0f);
+  std::vector<float> h_B(static_cast<size_t>(K) * N);
 
   for (uint32_t i = 0; i < M; i++)
     h_A[i + i * K] = 1.0f;
@@ -128,14 +128,14 @@ TEST(GpuLinalgTest, MatMul) {
   CUDACHECK(cudaMalloc(&d_A, M * K * sizeof(float)));
   CUDACHECK(cudaMalloc(&d_B, K * N * sizeof(float)));
   CUDACHECK(cudaMalloc(&d_C, M * N * sizeof(float)));
-  CUDACHECK(cudaMemcpy(d_A, h_A, M * K * sizeof(float), cudaMemcpyHostToDevice));
-  CUDACHECK(cudaMemcpy(d_B, h_B, K * N * sizeof(float), cudaMemcpyHostToDevice));
+  CUDACHECK(cudaMemcpy(d_A, h_A.data(), M * K * sizeof(float), cudaMemcpyHostToDevice));
+  CUDACHECK(cudaMemcpy(d_B, h_B.data(), K * N * sizeof(float), cudaMemcpyHostToDevice));
 
   common::gpu::matMul(d_A, d_B, d_C, M, K, N, M, K, M);
   CUDACHECK(cudaGetLastError());
 
-  float h_C[M * N];
-  CUDACHECK(cudaMemcpy(h_C, d_C, M * N * sizeof(float), cudaMemcpyDeviceToHost));
+  std::vector<float> h_C(static_cast<size_t>(M) * N);
+  CUDACHECK(cudaMemcpy(h_C.data(), d_C, M * N * sizeof(float), cudaMemcpyDeviceToHost));
 
   for (uint32_t i = 0; i < M; i++) {
     for (uint32_t j = 0; j < N; j++) {
@@ -146,17 +146,19 @@ TEST(GpuLinalgTest, MatMul) {
 }
 
 TEST(GpuLinalgTest, MatMulTransposedMan) {
-  const uint32_t M = 10;
-  const uint32_t K = 10;
-  const uint32_t N = 10;
+  const uint32_t M = 1024;
+  const uint32_t K = 1024;
+  const uint32_t N = 1024;
 
-  float h_A[M * K] = {0.0f};
-  float h_B[K * N] = {0.0f};
-  float h_C[M * N] = {0.0f};
-  float h_C_refnn[M * N] = {0.0f};
-  float h_C_reftt[M * N] = {0.0f};
-  float h_C_reftn[M * N] = {0.0f};
-  float h_C_refnt[M * N] = {0.0f};
+  // Heap, not stack: seven 1024x1024 float buffers are ~28 MB total, far past
+  // the 8 MB stack limit.
+  std::vector<float> h_A(static_cast<size_t>(M) * K, 0.0f);
+  std::vector<float> h_B(static_cast<size_t>(K) * N, 0.0f);
+  std::vector<float> h_C(static_cast<size_t>(M) * N, 0.0f);
+  std::vector<float> h_C_refnn(static_cast<size_t>(M) * N, 0.0f);
+  std::vector<float> h_C_reftt(static_cast<size_t>(M) * N, 0.0f);
+  std::vector<float> h_C_reftn(static_cast<size_t>(M) * N, 0.0f);
+  std::vector<float> h_C_refnt(static_cast<size_t>(M) * N, 0.0f);
 
   for (uint32_t i = 0; i < K; i++) {
     h_A[i * M + i] = 1.0f;
@@ -175,11 +177,11 @@ TEST(GpuLinalgTest, MatMulTransposedMan) {
   CUDACHECK(cudaMalloc(&d_B, K * N * sizeof(float)));
   CUDACHECK(cudaMalloc(&d_C, M * N * sizeof(float)));
 
-  CUDACHECK(cudaMemcpy(d_A, h_A, M * K * sizeof(float), cudaMemcpyHostToDevice));
-  CUDACHECK(cudaMemcpy(d_B, h_B, K * N * sizeof(float), cudaMemcpyHostToDevice));
+  CUDACHECK(cudaMemcpy(d_A, h_A.data(), M * K * sizeof(float), cudaMemcpyHostToDevice));
+  CUDACHECK(cudaMemcpy(d_B, h_B.data(), K * N * sizeof(float), cudaMemcpyHostToDevice));
 
   common::gpu::matMul(d_A, d_B, d_C, M, K, N, M, K, M);
-  CUDACHECK(cudaMemcpy(h_C, d_C, M * N * sizeof(float), cudaMemcpyDeviceToHost));
+  CUDACHECK(cudaMemcpy(h_C.data(), d_C, M * N * sizeof(float), cudaMemcpyDeviceToHost));
 
   h_C_refnn[0] = 1.0f;
   for (uint32_t i = 1; i < K; i++)
@@ -199,7 +201,7 @@ TEST(GpuLinalgTest, MatMulTransposedMan) {
   }
 
   common::gpu::matMul<float, true, true>(d_A, d_B, d_C, M, K, N, M, K, M);
-  CUDACHECK(cudaMemcpy(h_C, d_C, M * N * sizeof(float), cudaMemcpyDeviceToHost));
+  CUDACHECK(cudaMemcpy(h_C.data(), d_C, M * N * sizeof(float), cudaMemcpyDeviceToHost));
 
   for (uint32_t i = 0; i < K - 1; i++)
     h_C_reftt[M * i + i] = 2.0f;
@@ -219,7 +221,7 @@ TEST(GpuLinalgTest, MatMulTransposedMan) {
   }
 
   common::gpu::matMul<float, true, false>(d_A, d_B, d_C, M, K, N, M, K, M);
-  CUDACHECK(cudaMemcpy(h_C, d_C, M * N * sizeof(float), cudaMemcpyDeviceToHost));
+  CUDACHECK(cudaMemcpy(h_C.data(), d_C, M * N * sizeof(float), cudaMemcpyDeviceToHost));
 
   for (uint32_t i = 0; i < K; i++)
     h_C_reftn[M * i + i] = 1.0f;
@@ -237,7 +239,7 @@ TEST(GpuLinalgTest, MatMulTransposedMan) {
   }
 
   common::gpu::matMul<float, false, true>(d_A, d_B, d_C, M, K, N, M, K, M);
-  CUDACHECK(cudaMemcpy(h_C, d_C, M * N * sizeof(float), cudaMemcpyDeviceToHost));
+  CUDACHECK(cudaMemcpy(h_C.data(), d_C, M * N * sizeof(float), cudaMemcpyDeviceToHost));
 
   for (uint32_t i = 0; i < K; i++)
     h_C_refnt[M * i + i] = 1.0f;
@@ -310,8 +312,8 @@ TEST(GpuLinalgTest, MatMulTransposed) {
 }
 
 TEST(GpuLinalgTest, matVecMult) {
-  const uint32_t M = 128;
-  const uint32_t N = 64;
+  const uint32_t M = 2024;
+  const uint32_t N = 128;
 
   float h_A[M * N], h_x[N], h_y[M], h_y_ref[M];
   common::cpu::fillRandom(h_A, M * N);

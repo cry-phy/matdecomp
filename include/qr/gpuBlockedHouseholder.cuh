@@ -45,7 +45,7 @@ void blockTrailingUpdate(T* C, const T* V, const T* Tmat, uint32_t M, uint32_t N
                          uint32_t panelWidth, T* W_workspace1, T* W_workspace2, T* C_workspace);
 
 template <typename T>
-void blockedOrchestrator(const T* A, T* res, uint32_t M, uint32_t N,
+void blockedOrchestrator(const T* A, T* reflector, T* R, uint32_t M, uint32_t N,
                          BlockedHouseholderWorkspace<T>&& workspace);
 
 template <typename T> void constructR(const T* finalMatrix, T* R, uint32_t M, uint32_t N);

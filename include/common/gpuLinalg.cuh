@@ -470,7 +470,7 @@ __global__ void gerKernel(const T* x, const T* y, T* A, uint32_t M, uint32_t N, 
  * @return void
  */
 template <typename T> void ger(const T* x, const T* y, T* A, uint32_t M, uint32_t N, uint32_t lda) {
-  dim3 blockDim(16, 16);
+  dim3 blockDim(BLOCK_SIZE, BLOCK_SIZE);
   dim3 gridDim((N + blockDim.x - 1) / blockDim.x, (M + blockDim.y - 1) / blockDim.y);
   gerKernel<T><<<gridDim, blockDim>>>(x, y, A, M, N, lda);
 }
@@ -530,8 +530,7 @@ __global__ void scalePerElementKernel(const T* a, T* res, uint64_t N, const T* f
  * @param res Output vector to hold the scaled result
  * @param N Number of elements in a and res
  * @param factors Device pointer to the scaling factors (one T per element on device)
- * @return voidOn exit: R = upper triangle of A; reflectors live in the lower part plus tau. For
- * explicit Q (org2r/orgqr): start from I and apply panels in reverse with larfb using Q (not Qᵀ).
+ * @return void
  */
 template <typename T> void scalePerElement(const T* a, T* res, uint64_t N, const T* factors) {
   uint32_t blockDim = MAX_BLOCK_SIZE;
@@ -552,8 +551,12 @@ template <typename T> __global__ void identifyMatrixSliceKernel(T* matrix, uint3
   uint32_t row = blockIdx.x * blockDim.x + threadIdx.x;
   uint32_t col = blockIdx.y * blockDim.y + threadIdx.y;
 
-  if (row < M && col < M) {
-    matrix[row * M + col] = (row == col) ? static_cast<T>(1) : static_cast<T>(0);
+  // Column-major (row + col * M), and bounded by N columns — not M. For square
+  // matrices the identity is symmetric so a row-major write looks correct, but
+  // for N < M it would spill an M x M block into an M x N buffer.
+  if (row < M && col < N) {
+    matrix[row + static_cast<uint64_t>(col) * M] =
+        (row == col) ? static_cast<T>(1) : static_cast<T>(0);
   }
 }
 
@@ -568,7 +571,7 @@ template <typename T> __global__ void identifyMatrixSliceKernel(T* matrix, uint3
  */
 template <typename T> void identityMatrixSlice(T* matrix, uint32_t M, uint32_t N) {
   dim3 blockDim(16, 16);
-  dim3 gridDim((M + blockDim.x - 1) / blockDim.x, (M + blockDim.y - 1) / blockDim.y);
+  dim3 gridDim((M + blockDim.x - 1) / blockDim.x, (N + blockDim.y - 1) / blockDim.y);
   identifyMatrixSliceKernel<T><<<gridDim, blockDim>>>(matrix, M, N);
 }
 

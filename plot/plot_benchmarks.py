@@ -37,6 +37,9 @@ import numpy as np
 # Skinny aspect ratios (N / M) to compare, with display labels.
 SKINNY_RATIOS = ((0.0625, "6.25pct"), (0.125, "12.5pct"), (0.25, "25pct"))
 
+# Super Skinny widths
+SUPER_SKINNY_NS = (2, 4, 8, 16, 32)
+
 # Matches both our templated benchmarks and the reference, which has no dtype
 # and a trailing ``/manual_time`` suffix (from UseManualTime):
 #   benchmarkGpuModifiedGramSchmidt<float>/512/2 -> algo, dtype, M, N
@@ -155,7 +158,7 @@ def _by_key_times(records):
 
 
 def plot_contour_vs_reference(records, outdir):
-    """Filled contour of the runtime ratio (algo / reference) over (N, M).
+    """Fill contour of the runtime ratio (algo / reference) over (N, M).
 
     One figure per (our-algorithm, reference) pair, sharing the matrix sizes the
     two have in common. Colour is ``log10(time_algo / time_ref)`` on a diverging
@@ -199,8 +202,7 @@ def plot_contour_vs_reference(records, outdir):
 
             fig, ax = plt.subplots(figsize=(7, 6))
             contour = ax.tricontourf(x, y, z, levels=levels, cmap=cmap, norm=norm)
-            ax.tricontour(x, y, z, levels=levels, colors="k", linewidths=0.3,
-                          alpha=0.4)
+            ax.tricontour(x, y, z, levels=levels, colors="k", linewidths=0.3, alpha=0.4)
             ax.plot(x, y, "k.", markersize=3, alpha=0.5)
 
             bar = fig.colorbar(contour, ax=ax)
@@ -215,9 +217,7 @@ def plot_contour_vs_reference(records, outdir):
                 "(red = slower than reference)"
             )
 
-            path = os.path.join(
-                outdir, f"contour_{algo}_vs_{ref_algo}_{dtype}.png"
-            )
+            path = os.path.join(outdir, f"contour_{algo}_vs_{ref_algo}_{dtype}.png")
             fig.savefig(path, dpi=150, bbox_inches="tight")
             plt.close(fig)
             print("wrote", path)
@@ -300,6 +300,82 @@ def plot_skinny(records, outdir):
         print("wrote", path)
 
 
+def plot_constant_width(records, outdir):
+    """Runtime vs M at fixed N, one figure per N."""
+    for N in SUPER_SKINNY_NS:
+        by_algo = defaultdict(list)
+        for rec in records:
+            if rec["N"] == N:
+                by_algo[rec["algo"]].append(rec)
+        if not by_algo:
+            print(f"no data for N = {N}; skipping")
+            continue
+
+        fig, ax = plt.subplots(figsize=(7, 5))
+        for algo in _algos(records):
+            if algo not in by_algo:
+                continue
+            sizes, times = _series(by_algo[algo])
+            _draw_series(ax, sizes, times, algo)
+
+        ax.set_xscale("log", base=2)
+        ax.set_yscale("log")
+        ax.set_xlabel("M (rows)")
+        ax.set_ylabel("runtime [ms]")
+        ax.set_title(f"Super-skinny QR (N = {N}): runtime by algorithm")
+        ax.grid(True, which="both", linewidth=0.3, alpha=0.5)
+        ax.legend()
+
+        path = os.path.join(outdir, f"super_skinny_comparison_N{N}.png")
+        fig.savefig(path, dpi=150, bbox_inches="tight")
+        plt.close(fig)
+        print("wrote", path)
+
+
+def plot_constant_elements(records, outdir):
+    """Compare different skinnyness ratios for a fixed number of elements (M*N)."""
+    # Group records by the total number of elements (M*N)
+    by_elements = defaultdict(list)
+    for rec in records:
+        total_elements = rec["M"] * rec["N"]
+        by_elements[total_elements].append(rec)
+
+    # Only plot where at least 4 different aspect ratios are present
+    for total_elements, recs in by_elements.items():
+        aspect_ratios = {r["N"] / r["M"] for r in recs}
+        if len(aspect_ratios) < 4:
+            continue
+
+        fig, ax = plt.subplots(figsize=(7, 5))
+        for algo in _algos(records):
+            algo_results = [
+                (r["N"] / r["M"], r["time_ms"]) for r in recs if r["algo"] == algo
+            ]
+            if not algo_results:
+                continue
+            # Sort by aspect ratio for plotting
+            algo_results.sort(key=lambda x: x[0])
+            aspect_ratios, times = zip(*algo_results, strict=True)
+            _draw_series(ax, aspect_ratios, times, algo)
+
+        ax.set_xscale("log")
+        ax.set_yscale("log")
+        ax.set_xlabel("aspect ratio (N / M)")
+        ax.set_ylabel("runtime [ms]")
+        ax.set_title(
+            f"QR with constant elements (M*N = {total_elements}): runtime by algorithm"
+        )
+        ax.grid(True, which="both", linewidth=0.3, alpha=0.5)
+        ax.legend()
+
+        path = os.path.join(
+            outdir, f"constant_elements_comparison_{total_elements}.png"
+        )
+        fig.savefig(path, dpi=150, bbox_inches="tight")
+        plt.close(fig)
+        print("wrote", path)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -321,6 +397,8 @@ def main():
     plot_contour_vs_reference(records, args.outdir)
     plot_square(records, args.outdir)
     plot_skinny(records, args.outdir)
+    plot_constant_width(records, args.outdir)
+    plot_constant_elements(records, args.outdir)
 
 
 if __name__ == "__main__":
