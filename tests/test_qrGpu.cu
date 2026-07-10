@@ -4,11 +4,13 @@
 #include "qr/gpuBlockedHouseholder.cuh"
 #include "qr/gpuGramSchmidt.cuh"
 #include "qr/gpuModifiedGramSchmidt.cuh"
+#include "qr/gpuTSQR.cuh"
 #include "qr/gpuhouseholder.cuh"
 #include "qrTestData.hpp"
 #include "gtest/gtest.h"
 #include <cstdlib>
 #include <cuda_runtime.h>
+#include <iomanip>
 #include <limits>
 
 // ── manufactured tests (known Q and R) ───────────────────────────────────────
@@ -119,6 +121,33 @@ TEST_P(QRTestFloat, GpuHouseholder) {
   cudaFree(d_Q);
   cudaFree(d_R);
   cudaFree(d_workspace);
+}
+
+TEST_P(QRTestFloat, GpuTSQR) {
+  const auto& tc = GetParam();
+  float *d_A, *d_R;
+  CUDACHECK(cudaMalloc(&d_A, M * N * sizeof(float)));
+  CUDACHECK(cudaMalloc(&d_R, N * N * sizeof(float)));
+  CUDACHECK(cudaMemcpy(d_A, tc.A, M * N * sizeof(float), cudaMemcpyHostToDevice));
+
+  // Run TSQR (only computes R)
+  qr::gpu::TSQR(d_A, d_R, M, N);
+  CUDACHECK(cudaDeviceSynchronize());
+
+  float tol = static_cast<float>(tc.kappa) * static_cast<float>(N) *
+              std::numeric_limits<float>::epsilon() * 100.0f;
+
+  float* h_R = common::cpu::allocBuffer<float>(N * N);
+  CUDACHECK(cudaMemcpy(h_R, d_R, N * N * sizeof(float), cudaMemcpyDeviceToHost));
+
+  // Verify R matches expected manufacturing data
+  for (size_t i = 0; i < N * N; ++i) {
+    EXPECT_NEAR(h_R[i], tc.expectedR[i], tol) << "R mismatch at index " << i;
+  }
+
+  common::cpu::freeBuffer(h_R);
+  cudaFree(d_A);
+  cudaFree(d_R);
 }
 
 class QRGpuReversalTest : public ::testing::TestWithParam<QRReversalCase> {
@@ -255,4 +284,54 @@ TEST_P(QRGpuReversalTest, GpuBlockedHouseholder) {
     EXPECT_NEAR(QR[i], h_A[i], t) << "QR != A at index " << i;
   delete[] QR;
   qr::gpu::freeWorkspace(d_workspace);
+}
+
+TEST_P(QRGpuReversalTest, GpuTSQR) {
+  // Run TSQR
+  qr::gpu::TSQR(d_A, d_R, M, N);
+  CUDACHECK(cudaDeviceSynchronize());
+
+  // Bring R back to host
+  CUDACHECK(cudaMemcpy(h_R, d_R, N * N * sizeof(float), cudaMemcpyDeviceToHost));
+  float t = tol();
+
+  // 1. Verify R upper triangularity
+  for (size_t j = 0; j < N; j++) {
+    for (size_t i = j + 1; i < N; i++) {
+      EXPECT_NEAR(h_R[i + j * N], 0.0f, t) << "R not upper triangular at [" << i << "," << j << "]";
+    }
+  }
+
+  // 2. Verify A^T * A == R^T * R
+  // Compute A^T * A (Result size: N x N)
+  float* AtA = new float[N * N];
+  for (size_t j = 0; j < N; ++j) {
+    for (size_t i = 0; i < N; ++i) {
+      float sum = 0.0f;
+      for (size_t k = 0; k < M; ++k) {
+        sum += h_A[k + i * M] * h_A[k + j * M];
+      }
+      AtA[i + j * N] = sum;
+    }
+  }
+
+  // Compute R^T * R (Result size: N x N)
+  float* RtR = new float[N * N];
+  for (size_t j = 0; j < N; ++j) {
+    for (size_t i = 0; i < N; ++i) {
+      float sum = 0.0f;
+      for (size_t k = 0; k < N; ++k) {
+        sum += h_R[k + i * N] * h_R[k + j * N];
+      }
+      RtR[i + j * N] = sum;
+    }
+  }
+
+  // Check mathematical equality between A^T*A and R^T*R
+  for (size_t i = 0; i < N * N; i++) {
+    EXPECT_NEAR(AtA[i], RtR[i], t * 10.0f) << "A^T * A != R^T * R at linear index " << i;
+  }
+
+  delete[] AtA;
+  delete[] RtR;
 }

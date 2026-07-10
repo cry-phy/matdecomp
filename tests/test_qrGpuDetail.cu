@@ -2,7 +2,6 @@
 #include "common/gpuUtils.cuh"
 #include "qr/gpuBlockedHouseholder.cuh"
 #include <gtest/gtest.h>
-#include <iomanip>
 
 TEST(detailBlockedHouseholder, singleReflectorTest) {
   const int M = 5;

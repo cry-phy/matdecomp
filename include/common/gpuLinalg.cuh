@@ -440,6 +440,7 @@ void matVecMult(const T* A, const T* x, T* y, uint32_t M, uint32_t N, uint32_t l
 }
 
 /**
+<<<<<<< HEAD
  * @brief Rank-1 update
  *
  * @param x Column vector of length M

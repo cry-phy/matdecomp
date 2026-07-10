@@ -14,9 +14,11 @@ template <typename T> struct BlockedHouseholderWorkspace {
   uint32_t panelWidth;
 };
 
+// Returns cudaSuccess, or the failing cudaMalloc's error (freeing any partial
+// allocations) so callers can skip oversized cases instead of aborting.
 template <typename T>
-void mallocWorkspace(BlockedHouseholderWorkspace<T>& workspace, uint32_t M, uint32_t N,
-                     uint32_t panelWidth);
+cudaError_t mallocWorkspace(BlockedHouseholderWorkspace<T>& workspace, uint32_t M, uint32_t N,
+                            uint32_t panelWidth);
 
 template <typename T> void freeWorkspace(BlockedHouseholderWorkspace<T>& workspace);
 

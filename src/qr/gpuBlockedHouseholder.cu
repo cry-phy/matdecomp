@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+
 #define PANEL_WIDTH 32
 
 namespace qr::gpu::_detail {
@@ -133,6 +134,7 @@ void buildTMatrix(T* V, T* tau, T* Tmat, uint32_t M, uint32_t N, uint32_t ldv) {
   }
 
   CUDACHECK(cudaFree(tmp_beta));
+  CUDACHECK(cudaFree(workspace));
   delete[] local_tau;
 }
 
@@ -176,7 +178,8 @@ void blockedOrchestrator(const T* A, T* reflectors, T* R, uint32_t M, uint32_t N
     cudaDeviceSynchronize();
 
     // We will build R along the way, so it must not be stashed before the GEMM calls in trailing
-    // update. Also prepare V to be only the reflectors below the diagonal, with diagonal set to 1!
+    // update. Also prepare V to be only the reflectors below the diagonal, with diagonal set to
+    // 1!
     for (uint32_t j = k; j < k + panelWidth; ++j) {
       CUDACHECK(cudaMemcpy(R + static_cast<uint64_t>(j) * N,
                            reflectors + static_cast<uint64_t>(j) * M, sizeof(T) * (j + 1),
@@ -249,16 +252,28 @@ template void constructQ<double>(const double*, double*, double*, uint32_t, uint
 namespace qr::gpu {
 
 template <typename T>
-void mallocWorkspace(BlockedHouseholderWorkspace<T>& workspace, uint32_t M, uint32_t N,
-                     uint32_t panelWidth) {
+cudaError_t mallocWorkspace(BlockedHouseholderWorkspace<T>& workspace, uint32_t M, uint32_t N,
+                            uint32_t panelWidth) {
   workspace.panelWidth = panelWidth;
-  CUDACHECK(cudaMalloc(&workspace.res, static_cast<uint64_t>(M) * N * sizeof(T)));
-  CUDACHECK(cudaMalloc(&workspace.tau, static_cast<uint64_t>(N) * sizeof(T)));
-  CUDACHECK(
-      cudaMalloc(&workspace.Tmat, static_cast<uint64_t>(panelWidth) * panelWidth * sizeof(T)));
-  CUDACHECK(cudaMalloc(&workspace.W1, static_cast<uint64_t>(M) * N * sizeof(T)));
-  CUDACHECK(cudaMalloc(&workspace.W2, static_cast<uint64_t>(M) * N * sizeof(T)));
-  CUDACHECK(cudaMalloc(&workspace.C_trail, static_cast<uint64_t>(M) * N * sizeof(T)));
+  workspace.res = workspace.tau = workspace.Tmat = nullptr;
+  workspace.W1 = workspace.W2 = workspace.C_trail = nullptr;
+
+  const uint64_t mn = static_cast<uint64_t>(M) * N;
+  cudaError_t err;
+  // Don't hard-exit on OOM: free any partial allocations and report, so callers can
+  // skip a too-large size and keep going.
+  if ((err = cudaMalloc(&workspace.res, mn * sizeof(T))) != cudaSuccess ||
+      (err = cudaMalloc(&workspace.tau, static_cast<uint64_t>(N) * sizeof(T))) != cudaSuccess ||
+      (err = cudaMalloc(&workspace.Tmat,
+                        static_cast<uint64_t>(panelWidth) * panelWidth * sizeof(T))) !=
+          cudaSuccess ||
+      (err = cudaMalloc(&workspace.W1, mn * sizeof(T))) != cudaSuccess ||
+      (err = cudaMalloc(&workspace.W2, mn * sizeof(T))) != cudaSuccess ||
+      (err = cudaMalloc(&workspace.C_trail, mn * sizeof(T))) != cudaSuccess) {
+    freeWorkspace(workspace);
+    return err;
+  }
+  return cudaSuccess;
 }
 
 template <typename T> void freeWorkspace(BlockedHouseholderWorkspace<T>& workspace) {
@@ -281,10 +296,10 @@ template void blockedHouseHolder<float>(const float*, float*, float*, uint32_t, 
                                         BlockedHouseholderWorkspace<float>&);
 template void blockedHouseHolder<double>(const double*, double*, double*, uint32_t, uint32_t,
                                          BlockedHouseholderWorkspace<double>&);
-template void mallocWorkspace<float>(BlockedHouseholderWorkspace<float>&, uint32_t, uint32_t,
-                                     uint32_t);
-template void mallocWorkspace<double>(BlockedHouseholderWorkspace<double>&, uint32_t, uint32_t,
-                                      uint32_t);
+template cudaError_t mallocWorkspace<float>(BlockedHouseholderWorkspace<float>&, uint32_t, uint32_t,
+                                            uint32_t);
+template cudaError_t mallocWorkspace<double>(BlockedHouseholderWorkspace<double>&, uint32_t,
+                                             uint32_t, uint32_t);
 template void freeWorkspace(BlockedHouseholderWorkspace<float>&);
 template void freeWorkspace(BlockedHouseholderWorkspace<double>&);
 } // namespace qr::gpu
