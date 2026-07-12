@@ -204,15 +204,24 @@ template <typename T> __global__ void correctSignsKernel(T* Q, T* R, uint32_t M,
 
 namespace qr::gpu {
 template <typename T>
-void Householder(const T* A, T* Q, T* R, uint32_t M, uint32_t N, T* workspace) {
-  T* d_R_tmp;
-  T* d_V;
-  T* d_tau;
+cudaError_t Householder(const T* A, T* Q, T* R, uint32_t M, uint32_t N, T* workspace) {
+  T* d_R_tmp = nullptr;
+  T* d_V = nullptr;
+  T* d_tau = nullptr;
 
+  // Needs two extra M*N scratch buffers. Don't hard-exit on OOM: free any partial
+  // allocation and report so callers can skip a too-large size gracefully.
   const uint64_t sizeMN = static_cast<uint64_t>(M) * N;
-  CUDACHECK(cudaMalloc(&d_R_tmp, sizeMN * sizeof(T)));
-  CUDACHECK(cudaMalloc(&d_V, sizeMN * sizeof(T)));
-  CUDACHECK(cudaMalloc(&d_tau, static_cast<uint64_t>(N) * sizeof(T)));
+  cudaError_t err;
+  if ((err = cudaMalloc(&d_R_tmp, sizeMN * sizeof(T))) != cudaSuccess ||
+      (err = cudaMalloc(&d_V, sizeMN * sizeof(T))) != cudaSuccess ||
+      (err = cudaMalloc(&d_tau, static_cast<uint64_t>(N) * sizeof(T))) != cudaSuccess) {
+    cudaGetLastError();
+    cudaFree(d_R_tmp);
+    cudaFree(d_V);
+    cudaFree(d_tau);
+    return err;
+  }
 
   uint32_t threadsPerBlock = 256;
   uint32_t blocksMN = static_cast<uint32_t>((sizeMN + threadsPerBlock - 1) / threadsPerBlock);
@@ -249,7 +258,9 @@ void Householder(const T* A, T* Q, T* R, uint32_t M, uint32_t N, T* workspace) {
   cudaFree(d_R_tmp);
   cudaFree(d_V);
   cudaFree(d_tau);
+  return cudaSuccess;
 }
-template void Householder<float>(const float*, float*, float*, uint32_t, uint32_t, float*);
-template void Householder<double>(const double*, double*, double*, uint32_t, uint32_t, double*);
+template cudaError_t Householder<float>(const float*, float*, float*, uint32_t, uint32_t, float*);
+template cudaError_t Householder<double>(const double*, double*, double*, uint32_t, uint32_t,
+                                         double*);
 } // namespace qr::gpu

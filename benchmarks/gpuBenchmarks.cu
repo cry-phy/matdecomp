@@ -156,7 +156,13 @@ template <typename T> static void benchmarkGpuHouseholder(benchmark::State& stat
   cudaDeviceSynchronize();
 
   for (auto _ : state) {
-    qr::gpu::Householder(d_A, d_Q, d_R, M, N, d_workspace);
+    // Householder allocates 2*M*N of internal scratch; on OOM it returns cleanly
+    // instead of aborting, so skip this size rather than crash the whole run.
+    if (qr::gpu::Householder(d_A, d_Q, d_R, M, N, d_workspace) != cudaSuccess) {
+      cudaGetLastError();
+      state.SkipWithError("Householder failed (out of memory for this size)");
+      break;
+    }
     cudaDeviceSynchronize();
   }
 
