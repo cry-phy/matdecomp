@@ -96,6 +96,13 @@ def load(paths):
             match = NAME_RE.match(entry["name"])
             if match is None:
                 continue
+
+            # Skip skipped/failed rows (e.g. OOM via SkipWithError): they carry
+            # error_occurred and/or a zero runtime, and log10(0) = -inf would
+            # break the contour triangulation.
+            if entry.get("error_occurred") or entry["real_time"] <= 0.0:
+                continue
+
             records.append(
                 {
                     "algo": _clean_algo(match["algo"]),
