@@ -42,7 +42,7 @@ template <typename T> void fillBuffer(T* buffer, uint64_t N, T value) {
   if (N == 0) {
     return; // No elements to fill
   }
-  const uint32_t threadsPerBlock = std::min(static_cast<uint32_t>(256), static_cast<uint32_t>(N));
+  const uint32_t threadsPerBlock = std::min(static_cast<uint32_t>(1024), static_cast<uint32_t>(N));
   uint32_t blocks = (N + threadsPerBlock - 1) / threadsPerBlock;
   fillBufferKernel<<<blocks, threadsPerBlock>>>(buffer, N, value);
   CUDACHECK(cudaGetLastError());

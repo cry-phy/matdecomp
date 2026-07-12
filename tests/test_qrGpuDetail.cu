@@ -2,7 +2,6 @@
 #include "common/gpuUtils.cuh"
 #include "qr/gpuBlockedHouseholder.cuh"
 #include <gtest/gtest.h>
-#include <iomanip>
 
 TEST(detailBlockedHouseholder, singleReflectorTest) {
   const int M = 5;
@@ -155,8 +154,9 @@ TEST(detailBlockedHouseholder, MatrixOrchestrationTest) {
   const uint32_t M = 48;
   const uint32_t N = 48;
 
-  float* d_A;
+  float *d_A, *d_R;
   CUDACHECK(cudaMalloc(&d_A, M * N * sizeof(float)));
+  CUDACHECK(cudaMalloc(&d_R, N * N * sizeof(float)));
 
   float* h_A = new float[M * N];
   common::cpu::fillRandom(h_A, M * N);
@@ -165,39 +165,18 @@ TEST(detailBlockedHouseholder, MatrixOrchestrationTest) {
   qr::gpu::BlockedHouseholderWorkspace<float> d_workspace1;
   qr::gpu::mallocWorkspace(d_workspace1, M, N, 16);
 
-  qr::gpu::_detail::blockedOrchestrator(d_A, d_workspace1.res, M, N, std::move(d_workspace1));
+  qr::gpu::_detail::blockedOrchestrator(d_A, d_workspace1.res, d_R, M, N, std::move(d_workspace1));
 
   qr::gpu::BlockedHouseholderWorkspace<float> d_workspace2;
   qr::gpu::mallocWorkspace(d_workspace2, M, N, N);
 
-  qr::gpu::_detail::blockedOrchestrator(d_A, d_workspace2.res, M, N, std::move(d_workspace2));
+  qr::gpu::_detail::blockedOrchestrator(d_A, d_workspace2.res, d_R, M, N, std::move(d_workspace2));
 
   // DEBUG print result intermediates:
   float* h_res1 = new float[M * N];
   float* h_res2 = new float[M * N];
   CUDACHECK(cudaMemcpy(h_res1, d_workspace1.res, M * N * sizeof(float), cudaMemcpyDeviceToHost));
   CUDACHECK(cudaMemcpy(h_res2, d_workspace2.res, M * N * sizeof(float), cudaMemcpyDeviceToHost));
-
-  std::cout << "Result from panelWidth=16:\n";
-  for (uint32_t i = 0; i < M; ++i) {
-    for (uint32_t j = 0; j < N; ++j) {
-      std::cout << h_res1[i + j * M] << std::setprecision(2) << " ";
-    }
-    std::cout << "\n";
-  }
-
-  std::cout << "\nResult from panelWidth=N:\n";
-  for (uint32_t i = 0; i < M; ++i) {
-    for (uint32_t j = 0; j < N; ++j) {
-      std::cout << h_res2[i + j * M] << std::setprecision(2) << " ";
-    }
-    std::cout << "\n";
-  }
-
-  // for (uint32_t i = 0; i < M * N; ++i) {
-  //   EXPECT_NEAR(h_res1[i], h_res2[i], 1e-4f)
-  //       << "Mismatch at index " << i << ": res1=" << h_res1[i] << ", res2=" << h_res2[i];
-  // }
 
   qr::gpu::freeWorkspace(d_workspace1);
   qr::gpu::freeWorkspace(d_workspace2);

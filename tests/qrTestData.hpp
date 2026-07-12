@@ -170,5 +170,8 @@ inline auto qrFloatReversalTestCases() {
                            QRReversalCase{"square_64x64",  64,  64,  2},
                            QRReversalCase{"square_128x128",128, 128, 3},
                            QRReversalCase{"tall_256x16",   256, 16,  4},
-                           QRReversalCase{"tall_512x8",    512, 8,   5});
+                           QRReversalCase{"tall_512x8",    512, 8,   5},
+                           QRReversalCase{"tall_1024x16", 1024, 16,  6},
+                           QRReversalCase{"tall_2024x64", 2024, 64,  7});
+
 }

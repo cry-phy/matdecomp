@@ -365,7 +365,7 @@ __global__ void __launch_bounds__(BLOCK_SIZE* BLOCK_SIZE)
   }
 
   if (row < M && col < N)
-    C[static_cast<uint64_t>(col) * ldC + row] = Cvalue; // C stored M x N (ld = M)
+    C[static_cast<uint64_t>(col) * ldC + row] = Cvalue;
 }
 
 /**
@@ -440,8 +440,8 @@ void matVecMult(const T* A, const T* x, T* y, uint32_t M, uint32_t N, uint32_t l
 }
 
 /**
- * @brief Rank-1 update (GER): A -= x ⊗ y, i.e. A[:, c] -= x * y[c] for every column c. Updates A in
- * place; no temporary outer product is materialized.
+<<<<<<< HEAD
+ * @brief Rank-1 update
  *
  * @param x Column vector of length M
  * @param y Row vector of length N
@@ -460,7 +460,7 @@ __global__ void gerKernel(const T* x, const T* y, T* A, uint32_t M, uint32_t N, 
 }
 
 /**
- * @brief Host launcher for the rank-1 update A -= x ⊗ y.
+ * @brief Host launcher for the rank-1 update
  *
  * @param x Column vector of length M
  * @param y Row vector of length N
@@ -470,9 +470,8 @@ __global__ void gerKernel(const T* x, const T* y, T* A, uint32_t M, uint32_t N, 
  * @param lda Leading dimension of A
  * @return void
  */
-template <typename T>
-void ger(const T* x, const T* y, T* A, uint32_t M, uint32_t N, uint32_t lda) {
-  dim3 blockDim(16, 16);
+template <typename T> void ger(const T* x, const T* y, T* A, uint32_t M, uint32_t N, uint32_t lda) {
+  dim3 blockDim(BLOCK_SIZE, BLOCK_SIZE);
   dim3 gridDim((N + blockDim.x - 1) / blockDim.x, (M + blockDim.y - 1) / blockDim.y);
   gerKernel<T><<<gridDim, blockDim>>>(x, y, A, M, N, lda);
 }
@@ -503,8 +502,7 @@ __global__ void scatterStridedKernel(const T* src, T* dst, uint32_t n, uint32_t 
  * @param stride Stride in elements between consecutive destination writes
  * @return void
  */
-template <typename T>
-void scatterStrided(const T* src, T* dst, uint32_t n, uint32_t stride) {
+template <typename T> void scatterStrided(const T* src, T* dst, uint32_t n, uint32_t stride) {
   uint32_t blockSize = MAX_BLOCK_SIZE;
   uint32_t numBlocks = (n + blockSize - 1) / blockSize;
   scatterStridedKernel<T><<<numBlocks, blockSize>>>(src, dst, n, stride);
@@ -533,8 +531,7 @@ __global__ void scalePerElementKernel(const T* a, T* res, uint64_t N, const T* f
  * @param res Output vector to hold the scaled result
  * @param N Number of elements in a and res
  * @param factors Device pointer to the scaling factors (one T per element on device)
- * @return voidOn exit: R = upper triangle of A; reflectors live in the lower part plus tau. For
- * explicit Q (org2r/orgqr): start from I and apply panels in reverse with larfb using Q (not Qᵀ).
+ * @return void
  */
 template <typename T> void scalePerElement(const T* a, T* res, uint64_t N, const T* factors) {
   uint32_t blockDim = MAX_BLOCK_SIZE;
@@ -555,8 +552,12 @@ template <typename T> __global__ void identifyMatrixSliceKernel(T* matrix, uint3
   uint32_t row = blockIdx.x * blockDim.x + threadIdx.x;
   uint32_t col = blockIdx.y * blockDim.y + threadIdx.y;
 
-  if (row < M && col < M) {
-    matrix[row * M + col] = (row == col) ? static_cast<T>(1) : static_cast<T>(0);
+  // Column-major (row + col * M), and bounded by N columns — not M. For square
+  // matrices the identity is symmetric so a row-major write looks correct, but
+  // for N < M it would spill an M x M block into an M x N buffer.
+  if (row < M && col < N) {
+    matrix[row + static_cast<uint64_t>(col) * M] =
+        (row == col) ? static_cast<T>(1) : static_cast<T>(0);
   }
 }
 
@@ -571,7 +572,7 @@ template <typename T> __global__ void identifyMatrixSliceKernel(T* matrix, uint3
  */
 template <typename T> void identityMatrixSlice(T* matrix, uint32_t M, uint32_t N) {
   dim3 blockDim(16, 16);
-  dim3 gridDim((M + blockDim.x - 1) / blockDim.x, (M + blockDim.y - 1) / blockDim.y);
+  dim3 gridDim((M + blockDim.x - 1) / blockDim.x, (N + blockDim.y - 1) / blockDim.y);
   identifyMatrixSliceKernel<T><<<gridDim, blockDim>>>(matrix, M, N);
 }
 

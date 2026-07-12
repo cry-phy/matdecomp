@@ -2,7 +2,51 @@
 #include "common/gpuUtils.cuh"
 #include "qr/gpuModifiedGramSchmidt.cuh"
 
+namespace {
+
+template <typename T> void gsComputeQ(const T* A, T* Q, uint32_t M, uint32_t N, T* workspace) {
+  T* d_normSq;
+  T* d_dot_ab;
+  T* d_dot_bb;
+  cudaMalloc(&d_normSq, sizeof(T));
+  cudaMalloc(&d_dot_ab, sizeof(T));
+  cudaMalloc(&d_dot_bb, sizeof(T));
+  cudaMemcpy(Q, A, M * N * sizeof(T), cudaMemcpyDeviceToDevice);
+
+  for (uint32_t j = 0; j < N; j++) {
+    common::gpu::normalize<T>(&Q[j * M], &Q[j * M], M, d_normSq);
+    for (uint32_t i = j + 1; i < N; i++) {
+      common::gpu::project<T>(&Q[i * M], &Q[j * M], workspace, M, d_dot_ab);
+      common::gpu::subtract<T>(&Q[i * M], workspace, &Q[i * M], M);
+    }
+  }
+
+  cudaFree(d_normSq);
+  cudaFree(d_dot_ab);
+  cudaFree(d_dot_bb);
+}
+
+template <typename T> void gsComputeR(const T* A, const T* Q, T* R, uint32_t M, uint32_t N) {
+  cudaMemset(R, 0, N * N * sizeof(T));
+  for (size_t j = 0; j < N; ++j) {
+    for (size_t i = 0; i <= j; ++i) {
+      common::gpu::dotProduct<T>(&Q[i * M], &A[j * M], &R[i + j * N], M);
+    }
+  }
+}
+
+} // namespace
+
 namespace qr::gpu {
+
+template <typename T>
+void modifiedGramSchmidtNaive(const T* A, T* Q, T* R, uint32_t M, uint32_t N, T* workspace) {
+  gsComputeQ(A, Q, M, N, workspace);
+  gsComputeR(A, Q, R, M, N);
+}
+
+template void modifiedGramSchmidtNaive<float>(const float*, float*, float*, uint32_t, uint32_t,
+                                              float*);
 
 template <typename T>
 void modifiedGramSchmidt(const T* A, T* Q, T* R, uint32_t M, uint32_t N, T* workspace) {

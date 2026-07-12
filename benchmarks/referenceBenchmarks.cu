@@ -60,15 +60,15 @@ static void benchmarkCusolver(benchmark::State& state) {
 }
 
 BENCHMARK(benchmarkCusolver)
-    ->Apply([](benchmark::internal::Benchmark* b) {
-      for (long M = 512; M <= 4096; M *= 2)
-        for (long N = 2; N <= M / 2; N *= 2)
+    ->Apply([](benchmark::Benchmark* b) {
+      for (long M = 512; M <= (1 << 16); M *= 2)
+        for (long N = 2; N <= M / 8; N *= 2)
           b->Args({M, N});
     })
     ->UseManualTime();
 
 BENCHMARK(benchmarkCusolver)
-    ->Apply([](benchmark::internal::Benchmark* b) {
+    ->Apply([](benchmark::Benchmark* b) {
       for (long M = 128; M <= 4096; M *= 2)
         b->Args({M, M});
     })
