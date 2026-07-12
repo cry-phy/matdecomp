@@ -196,15 +196,26 @@ template <typename T> static void benchmarkGpuModifiedGramSchmidt(benchmark::Sta
   int M = state.range(0);
   int N = state.range(1);
 
-  // Allocate memory for A, Q, R, and workspace
-  float* d_A;
-  float* d_Q;
-  float* d_R;
-  float* d_workspace;
-  cudaMalloc(&d_A, M * N * sizeof(float));
-  cudaMalloc(&d_Q, M * N * sizeof(float));
-  cudaMalloc(&d_R, N * N * sizeof(float));
-  cudaMalloc(&d_workspace, M * sizeof(float));
+  // Allocate A, Q, R, and workspace. Check the results: an unchecked failed
+  // pointer here would be written by randomFill/the algorithm and raise a sticky
+  // illegal-access that poisons every later benchmark in the run (silent no-op
+  // timings). On OOM, skip this size instead.
+  float* d_A = nullptr;
+  float* d_Q = nullptr;
+  float* d_R = nullptr;
+  float* d_workspace = nullptr;
+  const size_t szMN = static_cast<size_t>(M) * N * sizeof(float);
+  if (cudaMalloc(&d_A, szMN) != cudaSuccess || cudaMalloc(&d_Q, szMN) != cudaSuccess ||
+      cudaMalloc(&d_R, static_cast<size_t>(N) * N * sizeof(float)) != cudaSuccess ||
+      cudaMalloc(&d_workspace, static_cast<size_t>(M) * sizeof(float)) != cudaSuccess) {
+    cudaGetLastError();
+    cudaFree(d_A);
+    cudaFree(d_Q);
+    cudaFree(d_R);
+    cudaFree(d_workspace);
+    state.SkipWithError("cudaMalloc failed (out of memory for this size)");
+    return;
+  }
 
   // Initialize A with random values (for benchmarking purposes)
   common::gpu::randomFill<<<(M * N + 255) / 256, 256>>>(d_A, M * N);
@@ -245,15 +256,26 @@ template <typename T> static void benchmarkGpuModifiedGramSchmidtNaive(benchmark
   int M = state.range(0);
   int N = state.range(1);
 
-  // Allocate memory for A, Q, R, and workspace
-  float* d_A;
-  float* d_Q;
-  float* d_R;
-  float* d_workspace;
-  cudaMalloc(&d_A, M * N * sizeof(float));
-  cudaMalloc(&d_Q, M * N * sizeof(float));
-  cudaMalloc(&d_R, N * N * sizeof(float));
-  cudaMalloc(&d_workspace, M * sizeof(float));
+  // Allocate A, Q, R, and workspace. Check the results: an unchecked failed
+  // pointer here would be written by randomFill/the algorithm and raise a sticky
+  // illegal-access that poisons every later benchmark in the run (silent no-op
+  // timings). On OOM, skip this size instead.
+  float* d_A = nullptr;
+  float* d_Q = nullptr;
+  float* d_R = nullptr;
+  float* d_workspace = nullptr;
+  const size_t szMN = static_cast<size_t>(M) * N * sizeof(float);
+  if (cudaMalloc(&d_A, szMN) != cudaSuccess || cudaMalloc(&d_Q, szMN) != cudaSuccess ||
+      cudaMalloc(&d_R, static_cast<size_t>(N) * N * sizeof(float)) != cudaSuccess ||
+      cudaMalloc(&d_workspace, static_cast<size_t>(M) * sizeof(float)) != cudaSuccess) {
+    cudaGetLastError();
+    cudaFree(d_A);
+    cudaFree(d_Q);
+    cudaFree(d_R);
+    cudaFree(d_workspace);
+    state.SkipWithError("cudaMalloc failed (out of memory for this size)");
+    return;
+  }
 
   // Initialize A with random values (for benchmarking purposes)
   common::gpu::randomFill<<<(M * N + 255) / 256, 256>>>(d_A, M * N);
@@ -294,15 +316,26 @@ template <typename T> static void benchmarkGpuGramSchmidt(benchmark::State& stat
   int M = state.range(0);
   int N = state.range(1);
 
-  // Allocate memory for A, Q, R, and workspace
-  float* d_A;
-  float* d_Q;
-  float* d_R;
-  float* d_workspace;
-  cudaMalloc(&d_A, M * N * sizeof(float));
-  cudaMalloc(&d_Q, M * N * sizeof(float));
-  cudaMalloc(&d_R, N * N * sizeof(float));
-  cudaMalloc(&d_workspace, M * sizeof(float));
+  // Allocate A, Q, R, and workspace. Check the results: an unchecked failed
+  // pointer here would be written by randomFill/the algorithm and raise a sticky
+  // illegal-access that poisons every later benchmark in the run (silent no-op
+  // timings). On OOM, skip this size instead.
+  float* d_A = nullptr;
+  float* d_Q = nullptr;
+  float* d_R = nullptr;
+  float* d_workspace = nullptr;
+  const size_t szMN = static_cast<size_t>(M) * N * sizeof(float);
+  if (cudaMalloc(&d_A, szMN) != cudaSuccess || cudaMalloc(&d_Q, szMN) != cudaSuccess ||
+      cudaMalloc(&d_R, static_cast<size_t>(N) * N * sizeof(float)) != cudaSuccess ||
+      cudaMalloc(&d_workspace, static_cast<size_t>(M) * sizeof(float)) != cudaSuccess) {
+    cudaGetLastError();
+    cudaFree(d_A);
+    cudaFree(d_Q);
+    cudaFree(d_R);
+    cudaFree(d_workspace);
+    state.SkipWithError("cudaMalloc failed (out of memory for this size)");
+    return;
+  }
 
   // Initialize A with random values (for benchmarking purposes)
   common::gpu::randomFill<<<(M * N + 255) / 256, 256>>>(d_A, M * N);
@@ -343,15 +376,26 @@ template <typename T> static void benchmarkGpuGramSchmidtNaive(benchmark::State&
   int M = state.range(0);
   int N = state.range(1);
 
-  // Allocate memory for A, Q, R, and workspace
-  float* d_A;
-  float* d_Q;
-  float* d_R;
-  float* d_workspace;
-  cudaMalloc(&d_A, M * N * sizeof(float));
-  cudaMalloc(&d_Q, M * N * sizeof(float));
-  cudaMalloc(&d_R, N * N * sizeof(float));
-  cudaMalloc(&d_workspace, M * sizeof(float));
+  // Allocate A, Q, R, and workspace. Check the results: an unchecked failed
+  // pointer here would be written by randomFill/the algorithm and raise a sticky
+  // illegal-access that poisons every later benchmark in the run (silent no-op
+  // timings). On OOM, skip this size instead.
+  float* d_A = nullptr;
+  float* d_Q = nullptr;
+  float* d_R = nullptr;
+  float* d_workspace = nullptr;
+  const size_t szMN = static_cast<size_t>(M) * N * sizeof(float);
+  if (cudaMalloc(&d_A, szMN) != cudaSuccess || cudaMalloc(&d_Q, szMN) != cudaSuccess ||
+      cudaMalloc(&d_R, static_cast<size_t>(N) * N * sizeof(float)) != cudaSuccess ||
+      cudaMalloc(&d_workspace, static_cast<size_t>(M) * sizeof(float)) != cudaSuccess) {
+    cudaGetLastError();
+    cudaFree(d_A);
+    cudaFree(d_Q);
+    cudaFree(d_R);
+    cudaFree(d_workspace);
+    state.SkipWithError("cudaMalloc failed (out of memory for this size)");
+    return;
+  }
 
   // Initialize A with random values (for benchmarking purposes)
   common::gpu::randomFill<<<(M * N + 255) / 256, 256>>>(d_A, M * N);
