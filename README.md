@@ -15,7 +15,7 @@ mkdir -p build && cd build
 cmake -DCMAKE_CUDA_ARCHITECTURES=70 -DCMAKE_BUILD_TYPE=Release ..
 make -j8
 ```
-The test then run with the following job script:
+The test then run all Executables with the following job script:
 ```bash
 #!/bin/bash
 #SBATCH -p nvltv
@@ -23,8 +23,21 @@ The test then run with the following job script:
 #SBATCH -N 1
 #SBATCH -t 00:45:00
 module load cuda
-./build/tests/matdecomp_gpu_tests
+./build/tests/matdecomp_gpu_tests | tee gpu_tests.log
+./build/tests/matdecomp_cpu_tests | tee cpu_tests.log
+./build/benchmarks/matdecomp_gpu_benchmarks | tee gpu_benchmarks.log
+./build/benchmarks/matdecomp_cpu_benchmarks | tee cpu_benchmarks.log
+./build/benchmarks/matdecomp_reference_benchmarks | tee reference_benchmarks.log
 ```
+
+Available Test Executables:
+- `build/tests/matdecomp_gpu_tests`
+- `build/tests/matdecomp_cpu_tests`
+
+Available Benchmark Executables
+- `build/benchmarks/matdecomp_gpu_benchmarks`
+- `build/benchmarks/matdecomp_cpu_benchmarks`
+- `build/benchmarks/matdecomp_reference_benchmarks`
 
 ## Benchmarks
 
