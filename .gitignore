@@ -2,6 +2,7 @@
 
 !.gitignore
 !.clang-format
+!LICENSE
 # .clangd is machine-local (conda paths, GPU arch) — not tracked
 .clangd
 

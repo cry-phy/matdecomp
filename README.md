@@ -101,3 +101,12 @@ enough.
 |---|---|
 | ![N=4](resources/super_skinny_comparison_N4.png) | ![const](resources/constant_elements_comparison_2097152.png) |
 
+
+## License
+
+Copyright (C) 2026 Christof Stein, Max Hirtenlehner
+
+This program is free software: you can redistribute it and/or modify it
+under the terms of the GNU General Public License as published by the Free
+Software Foundation, either version 3 of the License, or (at your option)
+any later version. See [`LICENSE`](LICENSE) for the full text.
