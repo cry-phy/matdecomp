@@ -23,4 +23,7 @@
 !plot/run_benchmarks.sh
 !plot/requirements.txt
 
+!resources/
+!resources/**
+
 !**/CMakeLists.txt

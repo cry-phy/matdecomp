@@ -1,6 +1,24 @@
 # Matrix Decomposition
 
-This repository contains the final project for the course "HPC Implementierungen B: Beschleuniger". 
+QR decomposition on the GPU (CUDA), aimed at **tall and skinny** matrices
+(M ≫ N). Common QR routines are tuned for near-square matrices, while use
+cases like low-rank approximation need fast QR for N/M ≤ 5%.
+
+Implemented algorithms, each benchmarked against cuSOLVER and CPU versions:
+
+- **Classical / Modified Gram-Schmidt**: naive (dot product + AXPY) and
+  improved variants that batch the projections into GEMV + rank-1 updates
+- **Householder**: column-by-column reflections
+- **Blocked Householder**: panel factorization + GEMM-based trailing update
+  (`larft`/`larfb` style)
+- **TSQR**: communication-avoiding local QR per block + tree reduction of
+  the R factors
+
+All algorithms are tested with GoogleTest for reconstruction error,
+orthogonality of Q, upper-triangular R, and a fixed sign convention
+(positive diagonal of R).
+
+Final project for the course "HPC Implementierungen B: Beschleuniger".
 
 ## Contributors
 
@@ -72,7 +90,14 @@ The base script produces, in `plot/`:
 - Extremely skinny-matrix comparisons at N << M (`super_skinny_comparison_N*.png`)
 - Same Element count MxN comparisons at different aspect ratios (`constant_elements_comparison_*.png`)
 
-# Results
+## Results
 
-The Naive implementations of QR decomposition with Gram schmidt and modified Gram schmidt are not competitive with the CUSOLVER implementations. Only for N in the single digit range (N < 16) the naive implementations are faster than the CUSOLVER implementations. Similarly for the Hosueholder
+cuSOLVER wins overall. On very tall and skinny matrices, the improved
+Modified Gram-Schmidt matches or beats it. TSQR and Blocked Householder
+scale like cuSOLVER but are still slower, because they are not tuned
+enough.
+
+| Super-skinny (N = 4) | Constant elements (M·N = 2²¹) |
+|---|---|
+| ![N=4](resources/super_skinny_comparison_N4.png) | ![const](resources/constant_elements_comparison_2097152.png) |
 
